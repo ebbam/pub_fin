@@ -1,0 +1,79 @@
+---
+title: "Willamette Cleaning"
+author: "Ebba Mark"
+date: "`r Sys.Date()`"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(here)
+library(tidyverse)
+library(janitor)
+library(gridExtra)
+library(readr)
+library(data.table)
+library(openxlsx)
+```
+
+# Willamette: All data
+```{r setup, include=FALSE, eval = FALSE}
+
+#temp_all <- read_csv(here("data/raw/willamette_alldata/The Government Finance Database_All Data.csv"))
+#saveRDS(temp_all, here("data/raw/willamette_alldata/all_data.RDS"))
+
+all_data <- readRDS(here("data/raw/willamette_alldata/all_data.RDS"))
+
+all_data %>% summarise(across(everything(), n_distinct))
+
+#write.csv(temp_all, here("data/raw/willamette_alldata/all_data.csv"))
+#all_data_csv <- fread(here("data/raw/willamette_alldata/all_data.csv"))
+  
+```
+
+# County-level data
+```{r}
+temp_county <- read_csv(here("data/raw/willamette_county_data/CountyData.csv"))
+
+temper <- temp_county %>%
+  # Removes variables that do not provide unique distinguishing characteristics
+  select(-c(GOVSid, FIPSid, County, State_Code, Type_Code, FIPS_County, FIPS_Place, FYEndDate, YearPop, SchLevCode, FunctionCode, Enrollment)) %>%
+  # Converts to long format - each category name in "item_formal" and amount in "amount"
+  pivot_longer(cols = !c(Year4, Name, FIPS_Code_State, FIPS_Combined, Population), values_to = "amount", names_to = "item_formal") %>%
+  rename(year = Year4, county_name = Name, fips_state = FIPS_Code_State, fips = FIPS_Combined) %>% 
+  # Fixes inconsistent FIPS code for KETCHIKAN GATEWAY BOROUGH; FIPS changes in 2007 - verified that population total is consistent at time of switch (ie. unlikely there is a regrouping of counties)
+  mutate(fips = ifelse(county_name == "KETCHIKAN GATEWAY BOROUGH", "02130", fips))
+
+```
+
+# Item Codes
+```{r}
+# # Save item codes for categorisation
+# temper %>% 
+#   mutate(item = tolower(item_formal), 
+#     rev_exp_debt = case_when(grepl(c("rev|tax|lic|chg"), item) ~ "revenue",
+#                              grepl("ltd", item) ~ "debt")) %>% select(item, rev_exp_debt) %>% distinct %>% write.xlsx(here("data/raw/willamette_county_data/item_codes.xlsx"))
+
+item_codes <- read.xlsx(here("data/raw/willamette_county_data/item_codes.xlsx"))
+```
+
+# Expenditure data 2000-2020
+```{r}
+# Combine item codes with database also filter for data after 2000 to shorten dataset
+county_short <- temper %>% filter(year >= 2000) %>% 
+  mutate(item = tolower(item_formal)) %>% 
+  left_join(., item_codes, by = "item") %>% 
+  filter(rev_exp_debt == "expenditure")
+
+# Save temporary version of county short
+saveRDS(county_short, here("data/temp/county_short_expenditure.RDS"))
+
+```
+
+# Revenue data 2000-2020
+```{r}
+
+
+
+```
+

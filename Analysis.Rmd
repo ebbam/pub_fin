@@ -1,0 +1,530 @@
+---
+title: "Preliminary Analysis"
+author: "Ebba Mark"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# County-level data scoping
+This document explores the county-level data for completeness and other issues.
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(here)
+library(tidyverse)
+library(janitor)
+library(gridExtra)
+library(readr)
+library(data.table)
+library(usmap)
+library(viridis)
+library(gifski)
+library(gganimate)
+library(transformr)
+library(fixest)
+library(gtools)
+library(kableExtra)
+library(zoo)
+library(tidycensus)
+
+```
+
+# Plotting categories
+```{r}
+dfi <- readRDS(here("data/temp/pubexp_county_grouped_cleaned.RDS"))
+
+map_cats <- unique(dfi$sum_category)
+```
+
+
+```{r, eval = FALSE, include = FALSE}
+# Plotting functions and files
+anim_map <- function(df, cat){
+ p <- df %>% 
+    filter(year %in% seq(2002,2012,5) & sum_category == cat) %>% 
+    mutate(amount_pc = ifelse(amount_pc == 0, NA, log(amount_pc*1000))) %>% 
+    plot_usmap(data = ., values = "amount_pc", regions = "counties", col = "gray90", linewidth = 0.01, exclude = c("HI", "AK")) + 
+    scale_fill_distiller(palette = "Purples", name = "Log PC Expenditure (Thousands)", direction = 1, na.value = "gray90") +
+    theme(panel.background = element_rect(color = "white", fill = "white"),
+          plot.title = element_text(face = "bold"), legend.background=element_blank()) +
+    labs(title = paste0(cat, " - Expenditure per capita"), subtitle = "Year: {closest_state}") +
+    transition_states(year)
+ return(p)
+}
+
+for(el in map_cats){
+  anim_map(dfi, el) %>% anim_save(here(paste0("output/natl_gifs/natl_", gsub("&|,| ", "_", el), ".gif")), .)
+}
+
+
+### Quick Animate:
+# p2 <- county_cats %>%
+#   filter(year %in% seq(2002,2022,5) & large_category == "Public Welfare (Total)") %>%
+#   mutate(amount_pc = ifelse(amount_pc == 0, NA, amount_pc*1000)) %>%
+#   plot_usmap(data = ., values = "amount_pc", regions = "counties", col = "gray90", linewidth = 0.01, include = c("VA")
+#              ) +
+#   scale_fill_viridis() +
+#     theme(panel.background = element_rect(color = "white", fill = "white"),
+#           plot.title = element_text(face = "bold"), legend.background=element_blank()) +
+#   transition_states(year)
+# 
+# anim_save(here("output/test.gif"), p2)
+
+```
+
+# Animated Plots
+```{r, echo = FALSE}
+
+plot_list <- c()
+for(el in map_cats){
+  plot_list <- c(plot_list, paste0("output/natl_gifs/natl_", gsub("&|,| ", "_", el), ".gif"))
+}
+
+for(k in plot_list){
+  knitr::include_graphics(k, error = FALSE)
+}
+
+```
+
+
+# Plotting Totals
+```{r}
+# PA (42), TX (48), WV (54), WY (56)
+extr_ct <- dfi %>% 
+  filter(fips_state %in% c(42, 48, 54, 56)) %>% 
+  mutate(state_abb = case_when(fips_state == 42 ~ "PA",
+                               fips_state == 48 ~ "TX",
+                               fips_state == 54 ~ "WV",
+                               fips_state == 56 ~ "WY"),
+         state = case_when(fips_state == 42 ~ "Pennsylvania",
+                               fips_state == 48 ~ "Texas",
+                               fips_state == 54 ~ "West Virginia",
+                               fips_state == 56 ~ "Wyoming")) %>% 
+  ungroup
+```
+
+
+```{r, eval = FALSE, include = FALSE}
+
+anim_state <- function(df, st, cat){
+ p2 <- df %>% 
+    filter(year %in% seq(2002,2012,5) & sum_category == cat & state == st) %>% 
+    mutate(amount_pc = ifelse(amount_pc == 0, NA, log(amount_pc*1000))) %>% 
+    plot_usmap(data = ., values = "amount_pc", regions = "counties", col = "gray90", linewidth = 0.01, include = c(st)) + 
+      scale_fill_distiller(palette = "Purples", name = "Log PC Expenditure (Thousands)", direction = 1, na.value = "gray90") +
+    theme(panel.background = element_rect(color = "white", fill = "white"),
+          plot.title = element_text(face = "bold"), legend.background=element_blank()) +
+    labs(title = paste0(cat, " - Expenditure per capita"), subtitle = "Year: {closest_state}") +
+    transition_states(year)
+ return(p2)
+}
+
+for(el in unique(extr_ct$large_category)[39:43]){
+  print(el)
+  if(extr_ct %>% filter(state == "Wyoming" & large_category == el) %>% pull(amount_pc) %>% sum < 0.01){print(paste0(el, "failed"))
+    next
+    }else{
+  anim_state(extr_ct, "Wyoming", el) %>% anim_save(here(paste0("output/state_gifs/WY_", gsub(" ", "_", gsub("[()]", "", el)), ".gif")), .)}
+}
+```
+
+
+```{r}
+
+extr_ct %>% 
+  group_by(state, year, sum_category) %>% 
+  summarise(amount = sum(amount)) %>% 
+  ggplot(., aes(x = year, y = amount, fill = sum_category)) + 
+    geom_area() +
+  facet_wrap(~state, scales = "free") +
+  labs(x = "State", y = "Expenditure") +
+  theme(legend.position = "bottom")
+
+
+# By state
+extr_ct %>% 
+  group_by(state, year, sum_category) %>% 
+  summarise(amount = sum(amount)) %>% 
+  ggplot(., aes(x = year, y = amount, fill = sum_category), colour="black") + 
+  geom_bar(position="fill", stat="identity") +
+    coord_flip() +
+  labs(x = "Year", y = "Share of Expenditure", title = "Share of State-level Expenditure per Major Category") +
+  theme(legend.position = "bottom", axis.text.x = element_blank(), axis.ticks.x = element_blank(), legend.title = element_blank()) + 
+  facet_wrap(~state, scales = "free")
+
+
+```
+
+
+```{r, eval = FALSE, include = FALSE}
+
+anim_natl <- function(df, cat){
+ p <- df %>% 
+    filter(large_category == cat) %>% 
+    mutate(amount_pc = ifelse(amount_pc == 0, NA, log(amount_pc*1000))) %>% 
+    plot_usmap(data = ., values = "amount_pc", regions = "states", col = "gray90", linewidth = 0.01, exclude = c("HI", "AK")) + 
+    scale_fill_distiller(palette = "Purples", name = "Log PC Expenditure (Thousands)", direction = 1, na.value = "gray90") +
+    theme(panel.background = element_rect(color = "white", fill = "white"),
+          plot.title = element_text(face = "bold"), legend.background=element_blank()) +
+    labs(title = paste0(cat, " - Expenditure per capita"), subtitle = "Year: {closest_state}") +
+    transition_states(year)
+ return(p)
+}
+
+for(sec in unique(state_totals$large_category)){
+  state_totals %>% 
+     anim_save(here(paste0("output/natl_gifs/state_", gsub(" ", "_", gsub("[()]", "", el)), ".gif")), .)}
+}
+
+
+```
+
+# Simple time trends and TWFE regressions
+Standard linear time trends evaluated in state-fixed effects panel linear regression model from 2000-2020.
+
+```{r, echo = FALSE, message = FALSE, include=knitr::is_latex_output()}
+
+cats_clean <- lapply(map_cats, function(x) tolower(gsub("__", "_", gsub(",|&", "", gsub(" ", "_", x)))))
+
+temp <- dfi %>% 
+  rename(tot = amount, pc = amount_pc) %>% 
+  pivot_wider(names_from = sum_category, values_from = c(tot, pc), names_glue = "{sum_category}_{.value}") %>% 
+  clean_names %>% 
+  complete(year, fips)
+
+inter_temp <- temp %>%
+  group_by(fips) %>%
+  fill(fips_state, .direction = "downup") %>% #arrange(fips) %>% print(n = 21)
+  mutate(across(where(is.numeric), ~ ifelse(!(all(is.na(.) | . == 0)) & . == 0, NA, .))) %>%
+  mutate(across(where(is.numeric), ~na.approx(., rule = 2))) %>%
+  ungroup
+
+create_res <- function(df, cats, regx, suffix){
+  res <- tibble()
+  for(j in cats){
+    form <- as.formula(paste0(j, regx))
+    test <- feols(fml = form, data = df)
+    test <- test$coeftable %>% tibble
+    test$outcome_var <- j
+    res <- rbind(res, test)
+  }
+  
+  tbl <- res %>% 
+        mutate(sig = stars.pval(`Pr(>|t|)`),
+        outcome_var = str_to_title(gsub("_", " ", gsub(suffix, "", outcome_var)))) %>% 
+        relocate(outcome_var) %>% 
+        select(-`Pr(>|t|)`) %>% 
+        arrange(Estimate) %>% 
+    mutate(Estimate = paste0(round(Estimate, 2), sig), `Std. Error` = as.character(round(`Std. Error`, 2))) %>% 
+    select(-c(`t value`, sig)) %>% 
+    pivot_longer(!outcome_var, values_to = "Estimate", names_to = "_")
+    
+    return(list("res" = res, "tbl" = tbl))
+}
+
+# Time trends: Total expenditure with and without interpolated data
+time_raw <- create_res(df = temp, cats = paste0(cats_clean, "_tot"), regx = " ~ year | fips", suffix = "_tot")
+time_inter <- create_res(df = inter_temp, cats = paste0(cats_clean, "_tot"), regx = " ~ year | fips", suffix = "_tot")
+
+# TWFE Controlling for Population: Total expenditure with and without interpolated data
+pop_raw <- create_res(df = temp, cats = paste0(cats_clean, "_tot"), regx = " ~ population + gdp_real | year + fips", suffix = "_tot")
+pop_inter <- create_res(df = inter_temp, cats = paste0(cats_clean, "_tot"), regx = " ~ population + gdp_real | year + fips", suffix = "_tot")
+
+tj <- full_join(time_raw$tbl,
+          time_inter$tbl, by = c("outcome_var", "_"), suffix = c(".time_raw", "")) %>% 
+  full_join(., pop_raw$tbl, by = c("outcome_var", "_"), suffix = c(".time_inter", "")) %>% 
+          full_join(., pop_inter$tbl, by = c("outcome_var", "_"), suffix = c(".pop_raw", ".pop_inter")) %>% 
+  select(-`_`) %>% 
+  group_by(outcome_var) %>%
+    mutate(outcome_var = ifelse(duplicated(outcome_var), '', outcome_var)) %>% 
+  knitr::kable(., booktabs = TRUE, col.names = c("Outcome Variable", "w. Raw Data", "w. Lin. Interpol.", "w. Raw Data", "w. Lin. Interpol."), align = c("l","c","c","c","c"), format = "html") %>% 
+  add_header_above(c(" ", "Time Trends" = 2, "TWFE w. Pop. Control" = 2))
+
+knitr::asis_output(tj)
+
+```
+
+# Time Trends with Linear Interpolation
+```{r, echo = FALSE, message = FALSE, results = 'asis'}
+
+# Time trends: PC expenditure with and without interpolated data
+time_raw_pc <- create_res(df = temp, cats = paste0(cats_clean, "_pc"), regx = " ~ year | fips", suffix = "_pc")
+time_inter_pc <- create_res(df = inter_temp, cats = paste0(cats_clean, "_pc"), regx = " ~ year | fips", suffix = "_pc")
+
+# TWFE Controlling for GDP: PC expenditure with and without interpolated data
+gdp_raw_pc <- create_res(df = temp, cats = paste0(cats_clean, "_pc"), regx = " ~ gdp_real | year + fips", suffix = "_pc")
+gdp_inter_pc <- create_res(df = inter_temp, cats = paste0(cats_clean, "_pc"), regx = " ~ gdp_real | year + fips", suffix = "_pc")
+
+full_join(time_raw_pc$tbl,
+          time_inter_pc$tbl, by = c("outcome_var", "_"), suffix = c(".time_raw", "")) %>% 
+  full_join(., gdp_raw_pc$tbl, by = c("outcome_var", "_"), suffix = c(".time_inter", "")) %>% 
+          full_join(., gdp_inter_pc$tbl, by = c("outcome_var", "_"), suffix = c(".gdp_raw_pc", ".gdp_inter_pc")) %>% 
+  select(-`_`) %>% 
+  group_by(outcome_var) %>%
+    mutate(outcome_var = ifelse(duplicated(outcome_var), '', outcome_var)) %>% 
+  knitr::kable(., booktabs = TRUE, col.names = c("Outcome Variable", "w. Raw Data", "w. Lin. Interpol.", "w. Raw Data", "w. Lin. Interpol)"), align = c("l","c","c","c","c"), format = "html") %>%  
+  add_header_above(c(" ", "Time Trends" = 2, "TWFE w. GDP Control" = 2))
+
+```
+
+```{r, eval = FALSE, include = FALSE}
+# Alternative method of running multiple dep vars at the same time
+
+# Time trends: Total and per capita expenditure with raw dataset
+time_raw <- feols(
+  .[paste0(c(paste0(cats_clean, "_tot"), paste0(cats_clean, "_pc")))] ~ sw(year, population) | year + fips,
+  data = temp)
+
+# Time trends: Total and per capita expenditure with interpolated dataset
+time_inter <- feols(
+  .[paste0(c(paste0(cats_clean, "_tot"), paste0(cats_clean, "_pc")))] ~ year | fips,
+  data = inter_temp)
+
+# Pop control: Total expenditure with population control and TWFE w. raw dataset
+pop_raw <- feols(
+  .[paste0(c(paste0(cats_clean, "_tot")))] ~ population | year + fips,
+  data = temp)
+
+# Pop control: Total expenditure with population control and TWFE w. interpolated dataset
+pop_inter <- feols(
+  .[paste0(c(paste0(cats_clean, "_tot")))]  ~ population | year + fips,
+  data = inter_temp)
+
+
+panels <- list(
+  "Air Transport" = mod[grepl("air_transportation_tot", names(mod))],
+  "Education" = mod[grepl("education_tot", names(mod))]
+)
+
+modelsummary(
+  panels,
+  shape = "rcollapse",
+  gof_map = NA,
+  stars = TRUE)
+
+```
+
+# State lookup tables
+```{r}
+data(fips_codes)
+getstate <- fips_codes$state
+names(getstate) <- fips_codes$state_code
+
+
+tem <- data.frame(state.x77)               # Transform matrix into data frame
+sta <- cbind(state.abb, tem, state.region) # Combine the three data sets
+colnames(sta)[1] <- "State"                # Rename first column
+colnames(sta)[10] <- "Region"              # Rename the 10th column
+getregion <- sta$Region
+names(getregion) <- sta$State
+
+```
+
+
+# Totals
+```{r}
+
+tots <- readRDS(here("data/temp/pubexp_county_totals_cleaned.RDS")) %>% 
+  filter(will_category == "total direct expenditure") %>% 
+  complete(year, fips) %>% 
+  group_by(fips) %>%
+  fill(fips_state, .direction = "downup") %>% 
+  ungroup %>% 
+  mutate(state = getstate[fips_state],
+         region = getregion[state])
+
+
+inter_tots <- tots %>% 
+  group_by(fips) %>%
+  # group_by(fips, fips_state) %>% select(fips, fips_state) %>% ungroup %>% mutate(test = substr(fips, 1,2) != fips_state) %>%  summarise(sum(test))
+  mutate(across(where(is.numeric), ~ ifelse(!(all(is.na(.) | . == 0)) & . == 0, NA, .))) %>%
+  mutate(across(where(is.numeric), ~na.approx(., rule = 2))) %>%
+  ungroup
+
+ests <- c("amount ~ year | fips",
+          "amount ~ year + Population + gdp_real | fips",
+          "amount ~ Population + gdp_real | fips + year",
+          "amount_pc ~ gdp_real | fips + year")
+
+tots_raw <- list()
+for(el in ests){
+  tots_raw <- c(feols(as.formula(el), data = tots))
+}
+
+tots_inter <- list()
+for(el in ests){
+  tots_inter <- c(feols(as.formula(el), data = inter_tots))
+}
+
+
+```
+# Plot 1
+```{r}
+
+# reg_pop <- dfi %>% 
+#   select(fips, year, Population) %>% 
+#   distinct
+# 
+# reg_controls <- rgdp %>% 
+#   filter(fips %in% dfi$fips) %>% 
+#   mutate(fips_state = substr(fips, 1,2),
+#          state = getstate[fips_state],
+#          region = getregion[state])
+
+# Total as recorded by region
+p1 <- tots %>% 
+  group_by(year, region) %>% 
+  summarise(amount = sum(amount, na.rm = TRUE),
+            population = sum(Population, na.rm = TRUE),
+            gdp_real = sum(gdp_real, na.rm = TRUE)) %>% 
+  ungroup %>% 
+  mutate(amount_pc = amount/population,
+         amount_per_gdp = amount/gdp_real) %>% 
+  ggplot(aes(x = year, y = amount_pc, fill = region)) +
+  geom_area() +
+  labs(x = "Year", y = "Expenditure per capita", title = "Total Direct Expenditure per Capita by Region") +
+  theme(legend.position = "bottom")
+  
+# p2 <- tots %>% 
+#   group_by(year, region, sum_category) %>% 
+#   summarise(amount = sum(amount, na.rm = TRUE),
+#             population = sum(Population, na.rm = TRUE),
+#             gdp_real = sum(gdp_real, na.rm = TRUE)) %>% 
+#   ungroup %>% 
+#   mutate(amount_pc = amount/population,
+#          amount_per_gdp = amount/gdp_real) %>% 
+#   ggplot(aes(x = year, y = amount_pc, fill = sum_category)) +
+#   geom_area() +
+#   facet_wrap(~region, scales = "free") +
+#   labs(x = "Year", y = "Expenditure per capita", title = "Total Direct Expenditure per Capita by State per Region") +
+#   theme(legend.position = "bottom")
+  
+
+```
+
+```{r}
+# temp <- dfi %>% 
+#   rename(tot = amount, pc = amount_pc) %>% 
+#   pivot_wider(names_from = sum_category, values_from = c(tot, pc), names_glue = "{sum_category}_{.value}") %>% 
+#   clean_names %>% 
+#   complete(year, fips)
+
+# National Expenditure per category (as calculated from expenditure categories)
+p3 <- dfi %>% 
+  group_by(year, sum_category) %>% 
+  summarise(amount = sum(amount, na.rm = TRUE),
+            population = sum(Population, na.rm = TRUE),
+            gdp_real = sum(gdp_real, na.rm = TRUE)) %>% 
+  ungroup %>% 
+  mutate(amount_pc = amount/population,
+         amount_per_gdp = amount/gdp_real) %>% 
+  ggplot(aes(x = year, y = amount_pc, fill = sum_category)) +
+  geom_area() +
+  labs(x = "Year", y = "Expenditure per capita", title = "National Expenditure per Category") +
+  theme(legend.position = "bottom")
+
+# TOTAL expenditure as calculated from our low-level categories
+p4 <- dfi %>% 
+  mutate(state = getstate[fips_state],
+         region = getregion[state]) %>%
+  group_by(year, region) %>% 
+  summarise(amount = sum(amount, na.rm = TRUE)) %>% 
+  # NOT PER CAPITA VALUES
+  ggplot(aes(x = year, y = amount, fill = region)) +
+  geom_area() +
+  labs(x = "Year", y = "Expenditure", title = "National Expenditure per Region (as calculated from expenditure categories)") +
+  theme(legend.position = "bottom")
+
+temp_dfi <- dfi %>% 
+  mutate(broad_cat = case_when(sum_category %in% c("Air Transportation",
+                                                   "Port Facilities",
+                                                   "Liquor Stores") ~ "Commercial",
+                               sum_category %in% c("Education", 
+                                                   "Housing & Community Development",
+                                                   "Fire Protection",      
+                                                   "Health & Hospitals",
+                                                   "Public Services & Facilities",
+                                                   "Public Welfare") ~ "Public Welfare, Services & Facilities",
+                               sum_category %in% c("General Administration",     
+                                                   "Interest on Debt", 
+                                                   "NEC") ~ "Administration & Misc.",
+                               sum_category %in% c("Highways",                  
+                                                   "Protective Inspection & Regulation",
+                                                   "Waste Management & Sewerage",
+                                                   "Utilities",
+                                                   "Police, Corrections & Judicial") ~ "Infrastructure, Utilities & Regulation"),
+         state = getstate[fips_state],
+         region = getregion[state])
+
+p5a <- temp_dfi %>% 
+  group_by(year, broad_cat) %>% 
+  summarise(amount = sum(amount, na.rm = TRUE),
+            population = sum(Population, na.rm = TRUE),
+            gdp_real = sum(gdp_real, na.rm = TRUE)) %>% 
+  ungroup %>% 
+  mutate(amount_pc = amount/population,
+         amount_per_gdp = amount/gdp_real) %>% 
+  ggplot(aes(x = year, y = amount_pc, fill = broad_cat)) +
+  geom_area() +
+  labs(x = "Year", y = "Expenditure per capita", title = "National Expenditure per Category") +
+  theme(legend.position = "right", legend.key.size = unit(0.5, 'cm'))
+
+p5b <- temp_dfi %>% 
+  group_by(year, sum_category, broad_cat) %>% 
+  summarise(amount = sum(amount, na.rm = TRUE),
+            population = sum(Population, na.rm = TRUE),
+            gdp_real = sum(gdp_real, na.rm = TRUE)) %>% 
+  ungroup %>% 
+  mutate(amount_pc = amount/population,
+         amount_per_gdp = amount/gdp_real) %>% 
+  ggplot(aes(x = year, y = amount_pc, fill = sum_category)) +
+  geom_area() +
+  facet_wrap(~broad_cat, scales = "free") +
+  labs(x = "Year", y = "Expenditure per capita", title = "National Expenditure per Category") +
+  theme(legend.position = "bottom", legend.key.size = unit(0.25, 'cm'))
+
+
+p6 <- temp_dfi %>% 
+  filter(broad_cat == "Public Welfare, Services & Facilities") %>% 
+  group_by(year, sum_category, region) %>% 
+  summarise(amount = sum(amount, na.rm = TRUE),
+            population = sum(Population, na.rm = TRUE),
+            gdp_real = sum(gdp_real, na.rm = TRUE)) %>% 
+  ungroup %>% 
+  ggplot(aes(x = year, y = amount, fill = sum_category)) +
+  geom_area(position="fill", stat="identity") +
+  scale_fill_brewer(name = "Expenditure Category", palette = "Spectral")+
+  facet_wrap(~region, scales = "free") +
+  labs(x = "Year", y = "Share of expenditure", title = "Share of Total 'Welfare' Expenditure by Category") +
+  theme(legend.position = "bottom", axis.text.y = element_blank())
+
+
+# Pull top 5 energy producing states (55% of national energy production)
+p7 <- temp_dfi %>% 
+  filter(state %in% c("TX", "PA", "WY", "OK", "WV", "ND")) %>% 
+    filter(broad_cat == "Public Welfare, Services & Facilities") %>% 
+  group_by(year, sum_category, state) %>% 
+  summarise(amount = sum(amount, na.rm = TRUE),
+            population = sum(Population, na.rm = TRUE),
+            gdp_real = sum(gdp_real, na.rm = TRUE)) %>% 
+  ungroup %>% 
+  mutate(amount_pc = amount/population,
+         amount_per_gdp = amount/gdp_real) %>% 
+  ggplot(aes(x = year, y = amount_pc, fill = sum_category)) +
+  geom_area(position="fill", stat="identity") +
+  scale_fill_brewer(name = "Expenditure Category", palette = "Spectral") +
+  facet_wrap(~state, scales = "free") +
+  labs(x = "Year", y = "Share of expenditure", title = "Share of Total 'Welfare' Expenditure by Category in Top Energy Producing States") +
+  theme(legend.position = "bottom", axis.text.y = element_blank())
+    
+
+grid.arrange(grobs = list(p1, p5a))
+p5b
+p6
+p7
+                          
+
+
+
+```
+

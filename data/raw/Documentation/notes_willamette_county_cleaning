@@ -1,0 +1,24 @@
+Willamette County Data Cleaning
+by Ebba Mark
+
+I have created a file called item_codes.xlsx which provides grouping category variables for different levels of aggregation of expenses (similar categorization for revenue, debt, and assets to come).
+
+item: original name of item from CountyData.csv
+
+rev_exp_debt: character variable distinguishing between revenue, expenditure, debt, assets.
+
+unsure: a warning column during organisation to signal which items had yet to be identified and matched to a category.
+
+will_category: the sector description for each item (ie. air transportation, public welfare, parks and rec) - this is only grouped by rev_exp_debt type (ie. capital outlay, direct expenditure, construction). The most granular/specific sector categorisation.
+
+large_category: the second-most granular grouping label which adds certain categories (ex. all hospital expenditures). Furthermore, this category distinguishes between variables that represent higher-level totals (ie. sums of multiple sectors) with a large_category label of "Total", whereas components of the high-level totals are labeled with sector categories (some of which are still sums of even lower-level categories like Highways = Toll + Non-Toll Highways).
+
+retain_total: a filtering variable to retain only sum values/the total expenditure in a given sector to avoid double-counting. Filtering on this variable ensures that no sub-components of a sectors expenditure/revenue/etc is retained in addition to a total expenditure category that accounts for it. 
+
+sum_category: the highest-level aggregating variable which can be used to group several sectors into more intuitive collections (all public welfare categories grouped into "Public Welfare")
+
+Notes: a non-variable, non-usable column to record notes in cleaning process. to be ignored.
+
+
+Additional notes:
+In the case of expenses, the sum of sub-categories do not add up to any total expense amount. There is always a difference that I cannot account for. I originally believed that the difference comes from the following codes [text in square brackets includes definition from 2006_classification_manual.pdf]: 26 (E,F,G) [E26 Federal and State Legislative - only valid at Federal and State], 85 (E,F,G,J) [Federal and State Veterans’ Services - only valid at Federal and State], Y14 [Benefit Payments - only valid at State], Y53 [Benefit and Withdrawal Payments - only valid at State], M30 [General Local Government Support - only valid at State], S67 [Federal Categorical Assistance Programs - only valid at State and for Washington DC] which are recorded as a portion of total expenses in the Appendix For The Government Finance Database. However, the validity table in the 2006_classification_manual.pdf show that these are only valid for higher levels of government. 
