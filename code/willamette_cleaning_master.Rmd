@@ -33,7 +33,7 @@ all_data %>% summarise(across(everything(), n_distinct))
 
 # County-level data
 ```{r}
-temp_county <- read_csv(here("data/raw/willamette_county_data/CountyData.csv"))
+temp_county <- read_csv(here("data/raw/CountyData.csv"))
 
 temper <- temp_county %>%
   # Removes variables that do not provide unique distinguishing characteristics

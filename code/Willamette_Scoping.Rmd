@@ -281,7 +281,7 @@ temp <- temp %>%
   fill(fips_state, .direction = "downup") %>% 
   ungroup
 
-temp_gdp2 <- ngdp %>% 
+temp_gdp <- ngdp %>% 
   full_join(rgdp, by = c("fips", "year")) %>% 
   left_join(temp, ., by = c("fips", "year")) %>% 
   filter(year != 2000)
@@ -325,7 +325,7 @@ temp_tot %>% pull(fips) %>% unique %>% setdiff(., unique(ngdp$fips)) %>% length(
 ngdp %>% 
   full_join(rgdp, by = c("fips", "year")) %>% 
   left_join(temp_tot, ., by = c("fips", "year")) %>% 
-  filter(year != 2000) %>% 
+  filter(year != 2000)
   #saveRDS(., here("data/temp/pubexp_county_totals_cleaned.RDS"))
   
 ```
