@@ -285,7 +285,7 @@ p1 <- tots %>%
   ggplot(aes(x = year, y = amount_pc, fill = region)) +
   geom_area() +
   labs(x = "Year", y = "Expenditure per capita", title = "Total Direct Expenditure per Capita by Region") +
-  theme(legend.position = "bottom")
+  theme(legend.position = "bottom") + guides(fill=guide_legend(ncol =1))
   
 # p2 <- tots %>% 
 #   group_by(year, region, sum_category) %>% 
@@ -304,7 +304,7 @@ p1 <- tots %>%
 
 ```
 
-```{r, warning=FALSE, message = FALSE, fig.height = 8}
+```{r, warning=FALSE, message = FALSE, fig.height = 8, fig.width = 8}
 
 # National Expenditure per category (as calculated from expenditure categories)
 p3 <- dfi %>% 
@@ -346,7 +346,13 @@ p5a <- temp_dfi %>%
   geom_area() +
   scale_fill_brewer(name = "Expenditure Category", palette = "Paired") +
   labs(x = "Year", y = "Expenditure per capita (thousands)", title = "National Expenditure per Broad Category") +
-  theme(legend.position = "bottom", legend.key.size = unit(0.5, 'cm'))
+  theme(legend.position = "bottom", legend.key.size = unit(0.5, 'cm'), plot.title = element_text(size=10)) + guides(fill=guide_legend(ncol =1, title.position = "top"))
+
+lev_order <- temp_dfi %>% 
+  arrange(broad_cat) %>% 
+  mutate(as.factor(sum_category)) %>% 
+  pull(sum_category) %>% 
+  unique
 
 p5b <- temp_dfi %>% 
   group_by(year, sum_category, broad_cat) %>% 
@@ -356,12 +362,15 @@ p5b <- temp_dfi %>%
   ungroup %>% 
   mutate(amount_pc = amount/population,
          amount_per_gdp = amount/gdp_real) %>% 
+  arrange(broad_cat) %>% 
+  mutate(sum_category = factor(sum_category, levels = lev_order)) %>%
   ggplot(aes(x = year, y = amount_pc, fill = sum_category)) +
   geom_area() +
   geom_area(position="fill", stat="identity") +
   facet_grid(broad_cat~., scales = "free") + 
-  labs(x = "Year", y = "Expenditure per capita (thousands)", title = "Composition of Broad National Expenditure Categories") +
-  theme(legend.position = "bottom", legend.key.size = unit(0.25, 'cm'))
+  scale_fill_viridis(name = "Exp. Cat.", option = "turbo", discrete = TRUE) +
+  labs(x = "Year", y = "Share of Expenditure", title = "Composition of Broad National Expenditure Categories") +
+  theme(legend.position = "bottom", legend.key.size = unit(0.2, 'cm'), plot.title = element_text(size=9), strip.text.y = element_text(size = 6)) + guides(fill=guide_legend(ncol =2, title.position = "top"))
 
 
 p6 <- temp_dfi %>% 
@@ -375,7 +384,7 @@ p6 <- temp_dfi %>%
   geom_area(position="fill", stat="identity") +
   scale_fill_brewer(name = "Expenditure Category", palette = "Spectral")+
   facet_wrap(~region, scales = "free") +
-  labs(x = "Year", y = "Share of expenditure", title = "Share of Total 'Welfare' Expenditure by Category and Region") +
+  labs(x = "Year", y = "Share of expenditure", title = "Share of Total 'Public Welfare, Services & Facilities' Expenditure by Category and Region") +
   theme(legend.position = "bottom", axis.text.y = element_blank())
 
 
@@ -394,7 +403,7 @@ p7 <- temp_dfi %>%
   geom_area(position="fill", stat="identity") +
   scale_fill_brewer(name = "Expenditure Category", palette = "Spectral") +
   facet_wrap(~state, scales = "free") +
-  labs(x = "Year", y = "Share of expenditure", title = "Share of Total 'Welfare' Expenditure by Category in Top Energy Producing States") +
+  labs(x = "Year", y = "Share of expenditure", title = "Share of 'Public Welfare, Services & Facilities' Expenditure by Cat. in Top Energy Producing States") +
   theme(legend.position = "bottom", axis.text.y = element_blank())
     
 
