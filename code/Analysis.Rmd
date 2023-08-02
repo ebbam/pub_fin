@@ -62,6 +62,8 @@ temp <- dfi %>%
   clean_names %>% 
   complete(year, fips)
 
+temp %>% summarise(across(8:41, ~sum(is.na(.x))))
+
 # Expenditure categories data: Linearly Interpolated Data
 inter_temp <- temp %>%
   group_by(fips) %>%
@@ -69,6 +71,10 @@ inter_temp <- temp %>%
   mutate(across(where(is.numeric), ~ ifelse(!(all(is.na(.) | . == 0)) & . == 0, NA, .))) %>%
   mutate(across(where(is.numeric), ~na.approx(., rule = 2))) %>%
   ungroup
+
+temp %>% summarise(across(8:41, ~sum(is.na(.x))))
+20431/60740
+inter_temp %>% summarise(across(8:41, ~sum(is.na(.x))))
 
 # Broad expenditure categories data
 temp_dfi <- dfi %>% 
@@ -481,6 +487,8 @@ broad_df_inter <- broad_df %>%
   ungroup
 
 broad_cats <- names(select(broad_df, -c(fips, year)))
+broad_df %>% summarise(across(3:10, ~sum(is.na(.x))))
+broad_df_inter %>% summarise(across(3:10, ~sum(is.na(.x))))
 
 
 # Time trends: Total expenditure with and without interpolated data
