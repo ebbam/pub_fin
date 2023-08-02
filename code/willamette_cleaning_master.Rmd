@@ -14,9 +14,11 @@ library(gridExtra)
 library(readr)
 library(data.table)
 library(openxlsx)
+
 ```
 
 # Willamette: All data
+This was moved during Github faff. Needs to be redownloaded and put in this folder.
 ```{r setup, include=FALSE, eval = FALSE}
 
 #temp_all <- read_csv(here("data/raw/willamette_alldata/The Government Finance Database_All Data.csv"))
@@ -44,6 +46,13 @@ temper <- temp_county %>%
   # Fixes inconsistent FIPS code for KETCHIKAN GATEWAY BOROUGH; FIPS changes in 2007 - verified that population total is consistent at time of switch (ie. unlikely there is a regrouping of counties)
   mutate(fips = ifelse(county_name == "KETCHIKAN GATEWAY BOROUGH", "02130", fips))
 
+py_test <- readRDS(here("data/temp/county_py_test.rds"))
+#test <- read.csv(here("data/temp/county_py_test.csv"))
+
+#temper %>% write.csv(here("data/temp/temper_r_test.csv"))
+
+#test %>% as.data.frame %>% select(c("year", "county_name", "item_formal", "amount")) #%>% all.equal(select(temper, c("year", "county_name", "item_formal", "amount"))
+
 ```
 
 # Item Codes
@@ -54,7 +63,8 @@ temper <- temp_county %>%
 #     rev_exp_debt = case_when(grepl(c("rev|tax|lic|chg"), item) ~ "revenue",
 #                              grepl("ltd", item) ~ "debt")) %>% select(item, rev_exp_debt) %>% distinct %>% write.xlsx(here("data/raw/willamette_county_data/item_codes.xlsx"))
 
-item_codes <- read.xlsx(here("data/raw/willamette_county_data/item_codes.xlsx"))
+item_codes <- read.xlsx(here("data/out/item_codes.xlsx"))
+
 ```
 
 # Expenditure data 2000-2020
@@ -66,7 +76,13 @@ county_short <- temper %>% filter(year >= 2000) %>%
   filter(rev_exp_debt == "expenditure")
 
 # Save temporary version of county short
-saveRDS(county_short, here("data/temp/county_short_expenditure.RDS"))
+readRDS(here("data/temp/county_short_expenditure.RDS")) %>% identical(county_short)
+#saveRDS(county_short, here("data/temp/county_short_expenditure.RDS"))
+
+county_full <- temper %>% 
+  mutate(item = tolower(item_formal)) %>% 
+  left_join(., item_codes, by = "item") %>% 
+  filter(rev_exp_debt == "expenditure")
 
 ```
 

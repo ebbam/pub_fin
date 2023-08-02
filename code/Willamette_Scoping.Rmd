@@ -22,19 +22,34 @@ library(readxl)
 The below imports the full county-level dataset from 2000 onwwards. Time series is shortened in willamette_cleaning_master.Rmd to speed up data processing. Original data starts in 1967 (although not checked for completeness).
 ```{r}
 
-#old_diffs <- county_cats %>% filter(!grepl("Total", large_category)) %>% group_by(fips, year) %>% summarise(sum #= sum(amount)) %>% ungroup %>% left_join(., county_total, by = c("fips", "year")) %>% mutate(test_diff = amount #- sum)
+county_short <- readRDS(here("data/temp/county_short_expenditure.RDS")) %>% 
+  arrange(fips, year)
+col_classes <- as.list(sapply(county_short, class))
 
-county_short <- readRDS(here("data/temp/county_short_expenditure.RDS"))
+county_short_py <- read.csv(here("data/temp/county_short_expenditure_py.csv"),
+                            colClasses = col_classes, na.strings = "") %>% 
+  tibble
 
-county_total <- county_short %>% 
-  select(fips, year, county_name, fips_state, Population, item_formal, item, amount) %>% 
-  filter(item_formal == "Total_Expenditure") %>% 
-  # Testing to see if year-fips observations are unique: Check!
-  # county_total %>% select(year, fips) %>% distinct %>% nrow %>% identical(nrow(county_total))
-  mutate(amount_pc = amount/Population) #%>% 
-  #complete(fips, year = 2000:2020)
+county_short_py %>% 
+  identical(county_short)
 
+county_full_py <- read.csv(here("data/temp/county_full_expenditure_py.csv"),
+                            colClasses = col_classes, na.strings = "") %>% 
+  tibble
+
+county_full_py %>% 
+  filter(year >= 2000) %>% 
+  identical(county_short)
+  
+
+```
+
+
+# Categorisation Transformation
+## 2000-2020
+```{r}
 # One graph of all TOTAL expenditure categories
+# will_category == "total expenditure" is the overall total expenditure
 county_totals <- county_short %>% 
    filter(!is.na(large_category) & retain_total & large_category %in% c("Total", "Interest on Debt")) %>% 
     group_by(year, fips, will_category, Population, fips_state) %>% 
@@ -57,31 +72,60 @@ county_high_cats <- county_short %>%
   summarise(amount = sum(amount, na.rm = TRUE)) %>% 
   mutate(amount_pc = amount/Population) %>% 
   ungroup
+```
+
+## 1970-2020
+```{r}
+# One graph of all TOTAL expenditure categories
+# will_category == "total expenditure" is the overall total expenditure
+full_totals <- county_full_py %>% 
+   filter(!is.na(large_category) & retain_total & large_category %in% c("Total", "Interest on Debt")) %>% 
+    group_by(year, fips, will_category, Population, fips_state) %>% 
+  summarise(amount = sum(amount, na.rm = TRUE)) %>% 
+  mutate(amount_pc = amount/Population) %>% 
+  ungroup
+
+# One of subcategories
+full_cats <- county_full_py %>%
+   filter(!is.na(large_category) & retain_total & large_category != "Total") %>% 
+   group_by(year, fips, large_category, Population, fips_state) %>% 
+  summarise(amount = sum(amount, na.rm = TRUE)) %>% 
+  mutate(amount_pc = amount/Population) %>% 
+  ungroup
+
+# One of higher-level categories 
+full_high_cats <- county_full_py %>% 
+   filter(!is.na(sum_category)) %>% 
+   group_by(year, fips, sum_category, Population, fips_state) %>% 
+  summarise(amount = sum(amount, na.rm = TRUE)) %>% 
+  mutate(amount_pc = amount/Population) %>% 
+  ungroup
 
 ```
 
-
+# Sanity testing
+## 2000 - 2021
 ```{r}
 
 # Check that county_cats and county_high_cats have same values: PASSED
-test <- county_cats %>% 
+test <- full_cats %>% 
   filter(!grepl("Total", large_category)) %>% 
   group_by(year, fips) %>% 
   summarise(sum_test = sum(amount, na.rm = TRUE)) %>% 
   ungroup
 
-county_high_cats %>% 
+full_high_cats %>% 
   group_by(year, fips) %>% 
   summarise(sum_test = sum(amount, na.rm = TRUE)) %>% 
   ungroup %>% 
-  identical(test)
+  all.equal(test)
 
 
 # There are significant discrepancies 
 # This tests whether rerunning the code changes the differences
-county_cats %>% filter(!grepl("Total", large_category)) %>% group_by(fips, year) %>% summarise(sum = sum(amount)) %>% left_join(., county_total, by = c("fips", "year")) %>% mutate(test_diff = amount - sum) %>% arrange(test_diff) # %>% ungroup %>% identical(old_diffs)
+full_cats %>% filter(!grepl("Total", large_category)) %>% group_by(fips, year) %>% summarise(sum = sum(amount)) %>% left_join(., county_total, by = c("fips", "year")) %>% mutate(test_diff = amount - sum) %>% arrange(test_diff) # %>% ungroup %>% identical(old_diffs)
 
-county_cats %>% filter(!grepl("Total", large_category)) %>% group_by(fips, year) %>% summarise(sum = sum(amount)) %>% left_join(., county_total, by = c("fips", "year")) %>% mutate(test_diff = amount - sum) %>% ggplot(aes(x = test_diff)) + geom_histogram(bins = 10) + geom_vline(xintercept = 0, linetype = "dashed", color = "red") + facet_wrap(~year)
+full_cats %>% filter(!grepl("Total", large_category)) %>% group_by(fips, year) %>% summarise(sum = sum(amount)) %>% left_join(., county_total, by = c("fips", "year")) %>% mutate(test_diff = amount - sum) %>% ggplot(aes(x = test_diff)) + geom_histogram(bins = 10) + geom_vline(xintercept = 0, linetype = "dashed", color = "red") + facet_wrap(~year)
 
 c_tots_short <- county_totals %>% select(year, fips, will_category, amount)
 for(k in unique(county_totals$will_category)){
@@ -131,7 +175,7 @@ grid.arrange(grobs = plots_slim, ncol = 4)
 ```
 
 
-```{r}
+```{r, include = FALSE, eval = FALSE}
 # Testing to find which combinations of categories add up to ANY available total
 # Selected FIPS with highest presence of expenditure across categories
 test2 <- county_short %>% filter(year == 2000 & fips == "36055" & large_category != "Total" & retain_total & !(will_category %in% c("highways (regular)", "highways (toll)", "elementary and secondary education", "higher education", "other education", "water utilities", "electric utilities", "gas utilities", "transit utilities")))
@@ -159,8 +203,9 @@ for(k in 1:length(comb)){
 
 
 # Data Completeness Testing
+## TS: 2000-2020
+### Checking missing values 
 ```{r}
-
 # Currently, Employment Security Administration, Other Education, Public Welfare (State Medicare), Unemployment Compensation (4 total) have NO reported expenditure
 county_high_cats %>% 
   group_by(sum_category) %>% 
@@ -175,7 +220,10 @@ county_rel <- county_high_cats %>%
   # Public Transit is missing from 2007
   # Retirement missing from 2017
   filter(!(sum_category %in% c("Public Transit", "Retirement")))
+```
 
+### Plotting
+```{r}
 # Check for presence of raw items
 county_short %>% 
   filter(!is.na(large_category) & retain_total) %>% 
@@ -188,7 +236,7 @@ county_short %>%
   ggplot(aes(x = year, y = item_formal, fill = present)) +
   geom_tile()
 
-# Shows coverage (binary) of our categories across our time period 2000-2020
+# Shows coverage (binary) of our categories across our time period 1967-2020
 county_rel %>% 
   mutate(amount = ifelse(is.na(amount), 0, amount),
          present = ifelse(amount != 0, 1, 0)) %>% 
@@ -197,24 +245,106 @@ county_rel %>%
   ungroup %>% 
   mutate(present = ifelse(present == 0, NA, present)) %>% 
   ggplot(aes(x = year, y = sum_category, fill = present)) +
-  geom_tile()
+  geom_tile() +
+  scale_fill_continuous(trans = 'reverse')
 
-# Shows coverage (magnitude) of our categories across our time period 2000-2020
+# Shows coverage (magnitude) of our categories across our time period 1967-2020
 county_rel %>% 
   group_by(year, sum_category)  %>% 
   summarise(mag = sum(amount, na.rm = TRUE)) %>% 
   ungroup %>% 
   mutate(mag = ifelse(mag == 0, NA, mag)) %>% 
   ggplot(aes(x = year, y = sum_category, fill = mag)) +
-  geom_tile()
-  
+  geom_tile() +
+  scale_fill_continuous(trans = 'reverse')
+
 # Saves a dataset in the temp folder that is grouped by the high categories at the county level from 2000-2020
 # saveRDS(county_rel, here("data/temp/pubexp_county_grouped_cleaned.RDS"))
 
 ```
 
+## TS: 1970-2020
+### Checking missing values 
 
-# County GDP
+```{r}
+full_high_cats %>% 
+  group_by(sum_category) %>% 
+  filter(all(amount == 0)) %>% 
+  pull(sum_category) %>% 
+  unique
+
+full_rel <- full_high_cats %>% 
+  group_by(sum_category) %>% 
+  filter(!(all(amount == 0))) %>% 
+  ungroup %>% 
+  # Only present in 1979 for one county - deleted
+  filter(!(sum_category %in% c("Employment Security"))) %>% 
+  # FIPS code is oly present 1967, 1970-1976 - not evidently incorporated elsewhere (officially, incorporated to fips code 51800 but this is not present in the dataset) therefore removed.
+  filter(fips != "51123")
+
+# Check for presence of raw items
+county_full_py %>% 
+  filter(!is.na(large_category) & retain_total) %>% 
+  mutate(amount = ifelse(is.na(amount), 0, amount),
+         present = ifelse(amount != 0, 1, 0)) %>% 
+  group_by(year, item_formal)  %>% 
+  summarise(present = sum(present)) %>% 
+  group_by(item_formal) %>% 
+  filter(all(present == 0)) %>% 
+  pull(item_formal) %>% 
+  unique
+```
+
+### Plotting
+```{r}
+
+# Check for presence of raw items
+county_full_py %>% 
+  filter(!is.na(large_category) & retain_total) %>% 
+  mutate(amount = ifelse(is.na(amount), 0, amount),
+         present = ifelse(amount != 0, 1, 0)) %>% 
+  group_by(year, item_formal)  %>% 
+  summarise(present = sum(present)) %>% 
+  ungroup %>% 
+  mutate(present = ifelse(present == 0, NA, present)) %>% 
+  ggplot(aes(x = year, y = item_formal, fill = present)) +
+  geom_tile()
+
+# Shows coverage (binary) of our categories across our time period 1967-2020
+full_rel %>% 
+  mutate(amount = ifelse(is.na(amount), 0, amount),
+         present = ifelse(amount != 0, 1, 0)) %>% 
+  group_by(year, sum_category)  %>% 
+  summarise(present = sum(present, na.rm = TRUE)) %>% 
+  ungroup %>% 
+  mutate(present = ifelse(present == 0, NA, present)) %>% 
+  ggplot(aes(x = year, y = sum_category, fill = present)) +
+  geom_tile() +
+  scale_fill_continuous(trans = 'reverse')
+
+# Shows coverage (magnitude) of our categories across our time period 1967-2020
+full_rel %>% 
+  group_by(year, sum_category)  %>% 
+  summarise(mag = sum(amount, na.rm = TRUE)) %>% 
+  ungroup %>% 
+  mutate(mag = ifelse(mag == 0, NA, mag)) %>% 
+  ggplot(aes(x = year, y = sum_category, fill = mag)) +
+  geom_tile() +
+  scale_fill_continuous(trans = 'reverse')
+
+full_rel %>% filter(year >= 2000 & (!(sum_category %in% c("Public Transit", "Retirement")))) %>% identical(county_rel)
+  
+# Saves a dataset in the temp folder that is grouped by the high categories at the county level from 1970-2020: no values reported for 1968 and 1969
+
+# full_rel %>% 
+#   filter(year >= 1970) %>% 
+#   saveRDS(., here("data/temp/full_pubexp_county_grouped_cleaned.RDS"))
+
+```
+
+
+# County GDP & Population
+## 2000 - 2020
 ```{r}
 # FIPS modifications - inconsistent FIPS codes between BEA sources and others
 # the following creates a lookup process for replacing standard FIPS codes with their BEA equivalents
@@ -253,7 +383,6 @@ bea_fips %>%
   ungroup %>% 
   filter(in_df != 1) %>% 
   nrow(.) == 0
-
 
 
 ngdp <- read.csv(here("data/raw/CAGDP2/CAGDP2__ALL_AREAS_2001_2021.csv"), nrows = 108052, colClasses = "character") %>% 
@@ -298,6 +427,110 @@ readRDS(here("data/temp/pubexp_county_grouped_cleaned.RDS")) %>%
 
 
 ```
+
+
+## 1970 - 2020
+```{r}
+# FIPS modifications - inconsistent FIPS codes between BEA sources and others
+# the following creates a lookup process for replacing standard FIPS codes with their BEA equivalents
+bea_fips <- read_excel(here("data/out/FIPSModificationsVA.xlsx"), skip = 1, col_types = c("text", "text","text","text"))
+getfips <- bea_fips$`BEA FIPS`
+names(getfips) <- bea_fips$FIPS
+
+temp <- full_rel %>% 
+  # Preserve original FIPS codes for plotting
+  mutate(fips_orig = fips, 
+           # Shannon County, SD (FIPS code = 46113) was renamed Oglala Lakota County and assigned anew FIPS code (46102) effective in 2014
+         fips = case_when(fips == "46113" ~ "46102",
+                          # 46131 was incorproated into 46071 in 1979 - only one data point in 1978, missing for 46071, likely missing therefore relabeled
+                          fips == "46131" ~ "46071",
+                          # Maui is recorded in non-BEA records as fips 15009 + fips 15005. 
+                          # 15005 not present in public finance dataset so only 15009 is replaced
+                          # fips == "15009" ~ "15901",
+                          # Replace the FIPS that are inconsistent between BEA and other sources
+                          #fips %in% names(getfips) ~ unname(getfips[fips]),
+                          TRUE ~ fips)) 
+
+
+# Calculate new per capita values bc some population totals have changed
+# Sanity checks to ensure no other values are changed
+temp %>% select(-fips_orig) %>% filter(!(fips %in% c("46102"))) %>% identical(filter(full_rel, !(fips %in% c("46113", "46102"))))
+temp %>% select(-c(fips, fips_orig)) %>% identical(select(full_rel, -fips))
+# Should only lose one FIPS code because of Shannon South Dakota
+n_distinct(full_rel$fips) - n_distinct(temp$fips) == 1
+#temp %>% pull(fips) %>% unique %>% setdiff(., unique(ngdp$fips)) %>% length(.) == 0
+
+# Concerned that there are the same amount of FIPS codes in the dataset after replacing with BEA matched codes (there should be less).
+# Following checks:
+# Passes the check
+bea_fips %>% 
+  group_by(`BEA FIPS`) %>% 
+  summarise(count = n(),
+            in_df = sum(FIPS %in% county_rel$fips)) %>% 
+  ungroup %>% 
+  filter(in_df != 1) %>% 
+  nrow(.) == 0
+
+temp <- temp %>% 
+  complete(year, fips, sum_category) %>% 
+  group_by(fips) %>%
+  fill(fips_state, .direction = "downup") %>% 
+  ungroup
+
+temp_gdp <- ngdp %>% 
+  full_join(rgdp, by = c("fips", "year")) %>% 
+  left_join(temp, ., by = c("fips", "year")) %>% 
+  filter(year != 2000)
+
+
+readRDS(here("data/temp/pubexp_county_grouped_cleaned.RDS")) %>% 
+  select(-fips) %>% 
+  filter(year != 2000) %>% 
+  identical(select(temp_gdp, -c(fips, fips_orig, gdp_nom, gdp_real)))
+  
+
+# Replacing above dataframe
+#saveRDS(temp_gdp, here("data/temp/pubexp_county_grouped_cleaned.RDS"))
+
+
+```
+
+
+# County Population 1970 -2014
+Source: https://data.nber.org/data/census_popest.html
+```{r}
+
+temp_gdp <- read.csv(here("data/raw/county_population.csv"), colClasses = list(fips = "character")) %>% 
+  tibble %>% 
+        # Removes US total
+  filter(state_fips != 0 &
+        # Removes state totals
+         county_fips != 0 &
+          # Retains only rows where population is reported
+         nchar(county_fips) <= 3) %>% 
+  mutate(fips = ifelse(fips == "46113", "46102", fips)) %>% 
+  # Removes columns with only NA values
+  select(-c(pop20104, base20104, pop2010, pop2011, pop2012, pop2013, pop2014))
+
+temp_gdp  %>% 
+ # filter(!complete.cases(.)) 
+  pull(fips) %>% unique %>% setdiff(unique(temp$fips), .) %>% length(.) == 0
+
+
+temp %>% 
+  filter(fips_state == "51") %>% 
+  mutate(amount = ifelse(is.na(amount), 0, amount),
+         present = ifelse(amount != 0, 1, 0)) %>% 
+  group_by(year, fips)  %>% 
+  summarise(present = sum(present, na.rm = TRUE)) %>% 
+  ungroup %>% 
+  mutate(present = ifelse(present == 0, NA, present)) %>% 
+  ggplot(aes(x = fips, y = year, fill = present)) +
+  geom_tile() +
+  scale_fill_continuous(trans = 'reverse')
+
+```
+
 
 # County Totals
 ```{r}
