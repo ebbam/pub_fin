@@ -267,6 +267,7 @@ county_rel %>%
 ### Checking missing values 
 
 ```{r}
+
 full_high_cats %>% 
   group_by(sum_category) %>% 
   filter(all(amount == 0)) %>% 
@@ -279,8 +280,9 @@ full_rel <- full_high_cats %>%
   ungroup %>% 
   # Only present in 1979 for one county - deleted
   filter(!(sum_category %in% c("Employment Security"))) %>% 
-  # FIPS code is oly present 1967, 1970-1976 - not evidently incorporated elsewhere (officially, incorporated to fips code 51800 but this is not present in the dataset) therefore removed.
-  filter(fips != "51123")
+  # FIPS code is only present 1967, 1970-1976 - not evidently incorporated elsewhere (officially, incorporated to fips code 51800 but this is not present in the dataset) therefore removed.
+  # Years before 1970 are removed because only 1967 (nothing reported from 1968-1969)
+  filter(fips != "51123" & year >= 1970)
 
 # Check for presence of raw items
 county_full_py %>% 
@@ -293,6 +295,7 @@ county_full_py %>%
   filter(all(present == 0)) %>% 
   pull(item_formal) %>% 
   unique
+
 ```
 
 ### Plotting
@@ -335,9 +338,7 @@ full_rel %>%
 full_rel %>% filter(year >= 2000 & (!(sum_category %in% c("Public Transit", "Retirement")))) %>% identical(county_rel)
   
 # Saves a dataset in the temp folder that is grouped by the high categories at the county level from 1970-2020: no values reported for 1968 and 1969
-
 # full_rel %>% 
-#   filter(year >= 1970) %>% 
 #   saveRDS(., here("data/temp/full_pubexp_county_grouped_cleaned.RDS"))
 
 ```
@@ -500,7 +501,7 @@ readRDS(here("data/temp/pubexp_county_grouped_cleaned.RDS")) %>%
 Source: https://data.nber.org/data/census_popest.html
 ```{r}
 
-temp_gdp <- read.csv(here("data/raw/county_population.csv"), colClasses = list(fips = "character")) %>% 
+pop_70_09 <- read.csv(here("data/raw/county_population.csv"), colClasses = list(fips = "character")) %>% 
   tibble %>% 
         # Removes US total
   filter(state_fips != 0 &
@@ -510,41 +511,103 @@ temp_gdp <- read.csv(here("data/raw/county_population.csv"), colClasses = list(f
          nchar(county_fips) <= 3) %>% 
   mutate(fips = ifelse(fips == "46113", "46102", fips)) %>% 
   # Removes columns with only NA values
-  select(-c(pop20104, base20104, pop2010, pop2011, pop2012, pop2013, pop2014))
+  # Removes pop19904 - the difference between pop1990 and pop19904 is max +/-3%
+    # Retains pop1990 as the true value
+  select(-c(pop20104, base20104, pop2010, pop2011, pop2012, pop2013, pop2014, pop19904)) %>% 
+  select(-c(state_fips, county_fips, areaname, state_name, county_name, fipsst, fipsco, region, division)) %>% 
+  pivot_longer(cols = starts_with("pop"), names_to = "year", values_to = "pop", names_prefix = "pop") %>% 
+  mutate(year = as.numeric(year),
+         # Dade County is relabeled in 1997 from 12025 to Miami-Dade County in 12086
+         fips = ifelse(fips == "12025", "12086", fips)) %>% 
+  filter(!(fips == "12086" & is.na(pop)))
 
-temp_gdp  %>% 
- # filter(!complete.cases(.)) 
-  pull(fips) %>% unique %>% setdiff(unique(temp$fips), .) %>% length(.) == 0
+pop_70_09 %>% 
+  left_join(temp, ., by = c("fips", "year"))
+  # Check to see whether any fips values are unmatched
+   filter(is.na(pop) & year <= 2009) %>% pull(fips) %>% unique
 
 
-temp %>% 
-  filter(fips_state == "51") %>% 
-  mutate(amount = ifelse(is.na(amount), 0, amount),
-         present = ifelse(amount != 0, 1, 0)) %>% 
-  group_by(year, fips)  %>% 
-  summarise(present = sum(present, na.rm = TRUE)) %>% 
-  ungroup %>% 
-  mutate(present = ifelse(present == 0, NA, present)) %>% 
-  ggplot(aes(x = fips, y = year, fill = present)) +
-  geom_tile() +
-  scale_fill_continuous(trans = 'reverse')
+
+# Checking Virginia coverage for 51123 fips code issue....
+# temp %>% 
+#   filter(fips_state == "51") %>% 
+#   mutate(amount = ifelse(is.na(amount), 0, amount),
+#          present = ifelse(amount != 0, 1, 0)) %>% 
+#   group_by(year, fips)  %>% 
+#   summarise(present = sum(present, na.rm = TRUE)) %>% 
+#   ungroup %>% 
+#   mutate(present = ifelse(present == 0, NA, present)) %>% 
+#   ggplot(aes(x = fips, y = year, fill = present)) +
+#   geom_tile() +
+#   scale_fill_continuous(trans = 'reverse')
+# 
+# # Checking completeness of GDP data
+# ## Confirms all FIPS codes in full dataset are present in GDP dataset
+# temp %>% 
+#   pull(fips) %>% unique %>% setdiff(., unique(temp_gdp$fips)) %>% length(.) == 0
+# 
+# incomp_pop <- temp_pop %>% 
+#   filter(fips %in% temp$fips) %>% 
+#   filter(!complete.cases(.)) %>% pull(fips) %>% 
+#   unique
+# 
+# temp %>% filter(fips %in% incomp_pop) %>% select(fips, year) %>% distinct %>% 
+#   mutate(present = 1) %>% 
+#   #pivot_wider(id_cols = fips, names_from = year, values_from = present) %>% 
+#     ggplot(aes(x = year, y = fips, fill = present)) +
+#   geom_tile()
+# 
+# 
+# pop_70_09 %>% 
+#   filter(fips %in% incomp_pop) %>% 
+#   select(-c(state_fips, county_fips, areaname, state_name, county_name, fipsst, fipsco, region, division)) %>% 
+#   pivot_longer(cols = starts_with("pop"), names_to = "year", values_to = "pop", names_prefix = "pop") %>% 
+#   #pivot_wider(id_cols = fips, names_from = year, values_from = present) %>% 
+#   ggplot(aes(x = year, y = fips, fill = pop)) +
+#   geom_tile()
+# 
+# # Final pivoted GDP file
+
+
+```
+
+# County Intercensal population data: 2010-2020:
+Source: https://www2.census.gov/programs-surveys/popest/datasets/2010-2020/counties/totals/
+Source: https://www.census.gov/data/datasets/time-series/demo/popest/2010s-counties-total.html
+```{r}
+# This dataset includes population estimates only
+pop_10_20 <- read.csv(here('data/raw/co-est2020.csv')) %>% 
+  tibble %>% 
+  # Filters out state-level observations
+  filter(SUMLEV == 50) %>% 
+  # Create fips codes from state and county fips codes
+  mutate(fips = paste0(str_pad(as.character(STATE), 2, "left", "0"), str_pad(as.character(COUNTY), 3, "left", "0"))) %>% 
+  select(fips, contains("POP"), -"POPESTIMATE042020", -"CENSUS2010POP") %>% 
+  pivot_longer(cols = starts_with("POPESTIMATE"), names_to = "year", values_to = "pop", names_prefix = "POPESTIMATE") %>% 
+  mutate(year = as.numeric(year)) 
+  
+# This dataset includes additional control variables related to birth rates, deathhs, international and domestic migration rates
+# read.csv(here('data/raw/co-est2020-alldata.csv')) %>% tibble %>% names
+
 
 ```
 
 
 # County Totals
 ```{r}
-temp_tot <- county_totals %>% 
+temp_tot <- full_totals %>% 
   # Preserve original FIPS codes for plotting
   mutate(fips_orig = fips, 
            # Shannon County, SD (FIPS code = 46113) was renamed Oglala Lakota County and assigned anew FIPS code (46102) effective in 2014
          fips = case_when(fips == "46113" ~ "46102",
+                          # 46131 was incorproated into 46071 in 1979 - only one data point in 1978, missing for 46071, likely missing therefore relabeled
+                          fips == "46131" ~ "46071",
                           # Maui is recorded in non-BEA records as fips 15009 + fips 15005. 
                           # 15005 not present in public finance dataset so only 15009 is replaced
-                          fips == "15009" ~ "15901",
+                          # fips == "15009" ~ "15901",
                           # Replace the FIPS that are inconsistent between BEA and other sources
-                          fips %in% names(getfips) ~ unname(getfips[fips]),
-                          TRUE ~ fips)) 
+                          #fips %in% names(getfips) ~ unname(getfips[fips]),
+                          TRUE ~ fips))  
 
 
 # Calculate new per capita values bc some population totals have changed
@@ -562,6 +625,8 @@ ngdp %>%
   #saveRDS(., here("data/temp/pubexp_county_totals_cleaned.RDS"))
   
 ```
+
+
 
 # Presence across counties
 ```{r}
