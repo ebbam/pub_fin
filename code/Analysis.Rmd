@@ -7,9 +7,7 @@ output: html_document
 
 # Overview 
 
-
-
-The following document provides an initial descriptive analysis and data coverage overview of the [[Annual Survey of State and Local Government Finances](https://www.census.gov/programs-surveys/gov-finances.html). The data is provided in a standardised format from [Willamette University](https://willamette.edu/mba/research-impact/public-datasets/index.html). The data is available at a county level between 1967 - 2020 with improved coverage in more recent years. The below data overview incorporates only data from 2001-2020 (can be expanded easily). The data has been cleaned and grouped into 17 expenditure categories (listed in data tree below), 4 higher-level categories (comprised of the 17 lower-level categories), and as a county-level total expenditure. All plots are presented using the raw data, whereas the tables presenting the linear time trend results include results for both the raw data and linearly interpolated data.
+The following document provides an initial descriptive analysis and data coverage overview of the [[Annual Survey of State and Local Government Finances](https://www.census.gov/programs-surveys/gov-finances.html). The data is provided in a standardised format from [Willamette University](https://willamette.edu/mba/research-impact/public-datasets/index.html). The data is available at a county level between 1970 - 2020 with improved coverage in more recent years. The data has been cleaned and grouped into 17 expenditure categories (listed in data tree below), 4 higher-level categories (comprised of the 17 lower-level categories), and as a county-level total expenditure. All plots are presented using the raw data, whereas the tables presenting the linear time trend results include results for both the raw data and linearly interpolated data.
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE)
@@ -33,6 +31,8 @@ library(tidycensus)
 library(data.tree)
 library(DiagrammeR)
 library(gstat)
+library(readxl)
+library(plm)
 
 ```
 
@@ -49,10 +49,17 @@ colnames(sta)[10] <- "Region"              # Rename the 10th column
 getregion <- sta$Region
 names(getregion) <- sta$State
 
+bea_fips <- read_excel(here("data/out/FIPSModificationsVA.xlsx"), skip = 1, col_types = c("text", "text","text","text"))
+getfips <- bea_fips$`BEA FIPS`
+names(getfips) <- bea_fips$FIPS
+
 ```
 
 ```{r, message = FALSE, echo = FALSE, include = FALSE}
-dfi <- readRDS(here("data/temp/pubexp_1970_2020_controls.RDS"))
+dfi <- readRDS(here("data/temp/pubexp_1970_2020.RDS")) %>% 
+  mutate(fips = ifelse(fips %in% names(getfips), unname(getfips[fips]), fips))
+
+controls <- readRDS(here("data/temp/cainc30_controls.rds"))
 
 map_cats <- unique(dfi$sum_category) 
 
@@ -108,26 +115,30 @@ temp_dfi <- dfi %>%
          region = getregion[state])
 
 # Total Expenditure data: Raw
-tots <- readRDS(here("data/temp/pubexp_1970_2020_totals_controls.RDS")) %>% 
+tots <- readRDS(here("data/temp/pubexp_1970_2020_totals.RDS")) %>% 
+  mutate(fips = ifelse(fips %in% names(getfips), unname(getfips[fips]), fips)) %>% 
   filter(will_category == "total direct expenditure") %>% 
   group_by(fips) %>%
   fill(fips_state, .direction = "downup") %>% 
   ungroup %>% 
   mutate(state = getstate[fips_state],
          region = getregion[state],
-         amount_pc = amount/pop)
+         amount_pc = amount/pop) %>% 
+    left_join(., controls, by = c('fips', 'year'))
 
 tots %>% summarise(across(everything(), ~sum(is.na(.x))))
 # 70% complete cases
 tots %>% filter(complete.cases(.)) %>% nrow(.)/nrow(temp)
+tots %>% select(fips, year, amount) %>% filter(!complete.cases(.)) %>% pull(year) %>% unique
 
 # Total Expenditure data: Linearly interpolated
 inter_tots <- tots %>% 
   group_by(fips) %>%
   # group_by(fips, fips_state) %>% select(fips, fips_state) %>% ungroup %>% mutate(test = substr(fips, 1,2) != fips_state) %>%  summarise(sum(test))
   mutate(across(where(is.numeric), ~ ifelse(!(all(is.na(.) | . == 0)) & . == 0, NA, .))) %>%
-  mutate(across(where(is.numeric), ~na.approx(., rule = 2))) %>%
+  mutate(across(where(is.numeric), ~ na.approx(., rule = 2))) %>%
   ungroup
+
 ```
 
 # Expenditure categories
@@ -163,6 +174,7 @@ anim_map <- function(df, cat){
 for(el in map_cats){
   anim_map(dfi, el) %>% anim_save(here(paste0("output/natl_gifs/natl_", gsub("&|,| ", "_", el), ".gif")), .)
 }
+
 
 
 ```
@@ -280,16 +292,6 @@ The below plots provide aggregated geographical (national, state, regional) summ
 
 ```{r, warning=FALSE, message = FALSE}
 
-# reg_pop <- dfi %>% 
-#   select(fips, year, pop) %>% 
-#   distinct
-# 
-# reg_controls <- rgdp %>% 
-#   filter(fips %in% dfi$fips) %>% 
-#   mutate(fips_state = substr(fips, 1,2),
-#          state = getstate[fips_state],
-#          region = getregion[state])
-
 # Total as recorded by region
 p1 <- tots %>% 
   group_by(year, region) %>% 
@@ -301,18 +303,6 @@ p1 <- tots %>%
   geom_area() +
   labs(x = "Year", y = "Expenditure per capita", title = "Total Direct Expenditure per Capita by Region") +
   theme(legend.position = "bottom") + guides(fill=guide_legend(ncol =1))
-  
-# p2 <- tots %>% 
-#   group_by(year, region, sum_category) %>% 
-#   summarise(amount = sum(amount, na.rm = TRUE),
-#             population = sum(pop, na.rm = TRUE)) %>% 
-#   ungroup %>% 
-#   mutate(amount_pc = amount/population) %>% 
-#   ggplot(aes(x = year, y = amount_pc, fill = sum_category)) +
-#   geom_area() +
-#   facet_wrap(~region, scales = "free") +
-#   labs(x = "Year", y = "Expenditure per capita", title = "Total Direct Expenditure per Capita by State per Region") +
-#   theme(legend.position = "bottom")
   
 
 ```
@@ -429,52 +419,72 @@ p7
 ```
 
 # Data Coverage
-## Geography - Broad Categories and Total Expenditure
-
-The animations below show the data coverage at a county level of the 4 broad categories (purple) and total expenditure values (green). Coverage is strong at this level. (Apologies for the poor arrangement!)
-
-```{r, echo = FALSE}
-
-plot_list <- paste0(here("output/mark/"), list.files(here("output/mark/")))
-
-knitr::include_graphics(plot_list)
-
-```
-
 ## Time - Missing Data
-```{r}
+```{r, message = FALSE, echo = FALSE}
 # Max possible values in each year is : 58102
 n_distinct(temp_dfi$fips) * n_distinct(temp_dfi$sum_category)
 
-# Histogram of missing values overall
-temp_dfi %>% 
-  group_by(broad_cat) %>% 
-  mutate(n_sum_cat = n_distinct(sum_category)) %>% 
+# Major conclusion about missing values: only due to non-reporting!
+miss_vals <- temp_dfi %>% select(fips, year, sum_category, amount) %>% filter(is.na(amount))
+cats <- unique(miss_vals$sum_category)
+d.list <- list()
+for(ck in cats){
+  d.list[[ck]] <- miss_vals %>% filter(sum_category == ck) %>% select(-sum_category)
+}
+length(unique(d.list)) == 1
+
+# Histogram of missing values overall: code only works because of above fact
+hist_time <- temp_dfi %>% 
+  group_by(fips, year) %>% 
+  summarise(amount = sum(amount)) %>% 
   ungroup %>% 
   filter(is.na(amount)) %>% 
   ggplot() + 
-  geom_histogram(aes(x = year, fill = broad_cat), bins = 51) +
-  geom_hline(aes(yintercept = n_sum_cat * n_distinct(temp_dfi$fips))) +
-  facet_wrap(~broad_cat, scales = "free")
+  geom_histogram(aes(year), bins = 51) +
+  geom_hline(aes(yintercept = n_distinct(temp_dfi$fips))) +
+  labs(title = "Missing values across full TS", subtitle = "Horizontal line represents total number of counties", y = "Number of counties not reporting", x = "Year")
 
-# Histogram of missing values overall
-temp_dfi %>% 
-  group_by(region) %>% 
-  mutate(n_fips = n_distinct(fips)) %>% 
+counties <- temp_dfi %>% 
+  group_by(fips, year) %>% 
+  summarise(amount = sum(amount)) %>% 
   ungroup %>% 
-  filter(is.na(amount)) %>% 
-  ggplot() + 
-  geom_histogram(aes(x = year, fill = sum_category), bins = 51) +
-  #geom_hline(aes(yintercept = n_fips * n_distinct(temp_dfi$sum_category))) + 
-  facet_wrap(~broad_cat, scales = "free")
+  group_by(fips) %>% 
+  summarise(nna = sum(is.na(amount)),
+            prop_missing = nna/51) %>% 
+  ungroup %>% 
+  plot_usmap(data = ., values = "prop_missing", regions = "counties", col = "gray90", linewidth = 0.01, exclude = c("HI", "AK")) + 
+    scale_fill_distiller(palette = "Purples", name = "Proportion", direction = 1, na.value = "gray90") +
+    theme(panel.background = element_rect(color = "white", fill = "white"),
+          plot.title = element_text(face = "bold"), legend.background=element_blank()) +
+    labs(title = paste0("Proportion of TS Missing"))
 
-# Histogram of missing values overall
-temp_dfi %>% 
-  filter(is.na(amount)) %>% 
-  ggplot() + 
-  geom_histogram(aes(x = year, fill = state), bins = 51) +
-  geom_hline(aes(yintercept = n_distinct(temp_dfi$fips) * n_distinct(temp_dfi$sum_category)))
+states <- plot_usmap(include = c("TX", "PA", "OK", "WY", "WV", "ND", "NV", "NM", "LA", "CO"))
 
+missing_spat <- ggplot() +  
+  geom_polygon(data=counties[[1]], 
+               aes(x=x, 
+                   y=y, 
+                   group=group, 
+                   fill = prop_missing), 
+               color = "black",
+               size = 0.01) +  
+  geom_polygon(data=states[[1]], 
+               aes(x=x, 
+                   y=y, 
+                   group=group), 
+               color = "red", 
+               fill = alpha(0.01)) + 
+  coord_equal() +
+  scale_fill_gradient(low='white', high='grey20')+
+  labs(y = NULL, x = NULL, title = "Proportion of missing TS by county", subtitle = "Top fossil-fuel producing states outlined in red") +
+   theme(panel.background = element_rect(color = "white", fill = "white"),
+          plot.title = element_text(face = "bold"), legend.background=element_blank(),
+      axis.text.x=element_blank(), 
+      axis.ticks.x=element_blank(), 
+      axis.text.y=element_blank(), 
+      axis.ticks.y=element_blank())
+
+grid.arrange(hist_time, missing_spat, ncol = 1)
 
 ```
 
@@ -482,7 +492,7 @@ temp_dfi %>%
 # Analysis of Time Trends
 
 The following tables provide standard linear time trends evaluated in a county-fixed effects panel linear regression model for a panel of 3,037 counties and for a time period of 2001-2020. \
-*Dependent variables*: Expenditure by category in levels and per capita values. \
+*Dependent variables*: Expenditure by category per capita values. \
 *Data*: Raw data and linearly interpolated data.
 
 *Result*: Expenditure levels increase (as seen in overview graphs) but per capita expenditure remains stationary.
@@ -494,9 +504,9 @@ The following tables provide standard linear time trends evaluated in a county-f
 create_res <- function(df, cats, regx, suffix){
   res <- tibble()
   for(j in cats){
-    form <- as.formula(paste0(j, regx))
-    test <- feols(fml = form, data = df)
-    test <- test$coeftable %>% tibble
+    form <- as.formula(paste0(j, '*1000', regx))
+    test <- feols(fml = form, data = df, panel.id = c('year', 'fips'), cluster = "fips")
+    test <- test$coeftable %>% as.tibble
     test$outcome_var <- j
     res <- rbind(res, test)
   }
@@ -514,16 +524,6 @@ create_res <- function(df, cats, regx, suffix){
     return(list("res" = res, "tbl" = tbl))
 }
 
-# broad_df <- temp_dfi %>%
-#   group_by(year, broad_cat, fips) %>%
-#   summarise(amount = sum(amount, na.rm = TRUE),
-#             population = sum(pop, na.rm = TRUE)) %>%
-#   ungroup %>%
-#   mutate(amount_pc = amount/population) %>% 
-#   complete(fips, year, broad_cat) %>% 
-#   rename(tot = amount, pc = amount_pc) %>% 
-#   pivot_wider(id_cols = c(fips, year), names_from = broad_cat, values_from = c(tot, pc), names_glue = "{broad_cat}_{.value}") %>% 
-#   clean_names
 
 broad_df <- temp_dfi %>% 
   group_by(year, broad_cat, fips) %>%
@@ -535,11 +535,13 @@ broad_df <- temp_dfi %>%
   mutate(amount_pc = amount/population) %>% 
   complete(fips, year, broad_cat) %>% 
   rename(tot = amount, pc = amount_pc) %>%
-  # START HERE: NEED TO MAKE SURE THAT ALL CONTROL VALUES ARE RETAINED
   pivot_wider(id_cols = c(fips, year), names_from = broad_cat, values_from = c(tot, pc), names_glue = "{broad_cat}_{.value}") %>% 
-  clean_names %>% arrange(fips, year)
+  clean_names %>% arrange(fips, year) %>% 
+  left_join(., controls, by = c('fips', 'year')) %>% 
+  mutate(time = year - 1970, 
+         state = getstate[substr(fips, 1,2)],
+         region = getregion[state])
   
-#identical(broad_df, broad_df2)
 
 broad_df_inter <- broad_df %>% 
   group_by(fips) %>%
@@ -551,41 +553,33 @@ broad_cats <- names(select(broad_df, -c(fips, year)))
 broad_df %>% summarise(across(3:10, ~sum(is.na(.x))))
 broad_df_inter %>% summarise(across(3:10, ~sum(is.na(.x))))
 
-
-# Time trends: Total expenditure with and without interpolated data
-time_broad_raw <- create_res(df = broad_df, cats = broad_cats[grepl("tot", broad_cats)], regx = " ~ year | fips", suffix = "_tot")
-time_broad_inter <- create_res(df = broad_df_inter, cats = broad_cats[grepl("tot", broad_cats)], regx = " ~ year | fips", suffix = "_tot")
-
 # Time trends: PC expenditure with and without interpolated data
-time_broad_raw_pc <- create_res(df = broad_df, cats = broad_cats[grepl("pc", broad_cats)], regx = " ~ year | fips", suffix = "_pc")
-time_broad_inter_pc <- create_res(df = broad_df_inter, cats = broad_cats[grepl("pc", broad_cats)], regx = " ~ year | fips", suffix = "_pc")
+time_broad_raw_pc <- create_res(df = broad_df, cats = broad_cats[grepl("pc", broad_cats)], regx = " ~ time | fips", suffix = "_pc")
+time_broad_inter_pc <- create_res(df = broad_df_inter, cats = broad_cats[grepl("pc", broad_cats)], regx = " ~ time | fips", suffix = "_pc")
 
-
-tk <- full_join(time_broad_raw$tbl,
-          time_broad_inter$tbl, by = c("outcome_var", "_"), suffix = c(".time_raw", "")) %>% 
-  full_join(., time_broad_raw_pc$tbl, by = c("outcome_var", "_"), suffix = c(".time_inter", "")) %>% 
-          full_join(., time_broad_inter_pc$tbl, by = c("outcome_var", "_"), suffix = c(".time_raw_pc", ".time_inter_pc")) %>% 
+tk <- full_join(time_broad_raw_pc$tbl, time_broad_inter_pc$tbl, by = c("outcome_var", "_"), suffix = c(".time_raw_pc", ".time_inter_pc")) %>% 
   select(-`_`) %>% 
   group_by(outcome_var) %>%
     mutate(outcome_var = ifelse(duplicated(outcome_var), '', outcome_var)) %>% 
-  knitr::kable(., booktabs = TRUE, col.names = c("Outcome Variable", "w. Raw Data", "w. Lin. Interpol.", "w. Raw Data", "w. Lin. Interpol."), align = c("l","c","c","c","c"), format = "html") %>% 
-  add_header_above(c(" ", "Expenditure (levels)" = 2, "Expenditure (per capita)" = 2))
+  knitr::kable(., booktabs = TRUE, col.names = c("Outcome Variable", "w. Raw Data", "w. Lin. Interpol."), align = c("l","c","c"), format = "html") %>% 
+  add_header_above(c(" ", "Expenditure PC" = 2))
 
 knitr::asis_output(tk)
 
 
 ```
 
+
 ## Across Granular Expenditure Categories (17)
 
 ```{r, echo = FALSE, message = FALSE, results = 'asis'}
 # Time trends: Total expenditure with and without interpolated data
-time_raw <- create_res(df = temp, cats = paste0(cats_clean, "_tot"), regx = " ~ year | fips", suffix = "_tot")
-time_inter <- create_res(df = inter_temp, cats = paste0(cats_clean, "_tot"), regx = " ~ year | fips", suffix = "_tot")
+time_raw <- create_res(df = temp, cats = paste0(cats_clean, "_tot"), regx = " ~ time | fips", suffix = "_tot")
+time_inter <- create_res(df = inter_temp, cats = paste0(cats_clean, "_tot"), regx = " ~ time | fips", suffix = "_tot")
 
 # Time trends: PC expenditure with and without interpolated data
-time_raw_pc <- create_res(df = temp, cats = paste0(cats_clean, "_pc"), regx = " ~ year | fips", suffix = "_pc")
-time_inter_pc <- create_res(df = inter_temp, cats = paste0(cats_clean, "_pc"), regx = " ~ year | fips", suffix = "_pc")
+time_raw_pc <- create_res(df = temp, cats = paste0(cats_clean, "_pc"), regx = " ~ time | fips", suffix = "_pc")
+time_inter_pc <- create_res(df = inter_temp, cats = paste0(cats_clean, "_pc"), regx = " ~ time | fips", suffix = "_pc")
 
 tj <- full_join(time_raw$tbl,
           time_inter$tbl, by = c("outcome_var", "_"), suffix = c(".time_raw", "")) %>% 
@@ -627,19 +621,81 @@ knitr::asis_output(tj)
 
 # Preliminary Analysis
 ## Time Trends
+```{r}
+
+deps = paste0(broad_cats[grepl("pc", broad_cats)], "*1000")
+
+# With the county-fixed effects you get an estimate that corrects for unit specific intercepts
+time_fe <- feols(data = broad_df, .[deps] ~ time | fips, panel.id = c('year', 'fips'), cluster = "fips")
+
+# AR with county-fixed effects
+ar <- feols(data = broad_df, public_welfare_services_facilities_pc*1000 ~ time + l(public_welfare_services_facilities_pc) | fips, panel.id = c('year', 'fips'), cluster = "fips")
+
+ar_twfe <- feols(data = broad_df, public_welfare_services_facilities_pc*1000 ~ l(public_welfare_services_facilities_pc) | fips + year, panel.id = c('year', 'fips'), se = "twoway")
+
+broad_df_inter_long <- broad_df_inter %>% 
+  select(fips, year, administration_misc_pc, 
+         commercial_pc, infrastructure_utilities_regulation_pc, 
+         public_welfare_services_facilities_pc) %>% 
+  pivot_longer(cols = !c(fips, year))
+# 
+# deps = broad_cats[grepl("pc", broad_cats)]
+# plist <- list()
+# for(k in deps[1:4]){
+#   plist[[k]] = broad_df_inter_long %>% 
+#   filter(name == k) %>% 
+#   group_by(year) %>%
+#   summarise(mean = log(mean(value, na.rm = TRUE)),
+#             upp_quart = log(quantile(value, probs = c(0.75), na.rm = TRUE)),
+#             low_quart = log(quantile(value, probs = c(0.25), na.rm = TRUE))) %>%
+#   left_join(broad_df_inter_long) %>%
+#   ggplot(data = ., 
+#          aes(x = year, y = log(value + 1))) +
+#   geom_point() +
+#   geom_line(aes(x = year, y = mean), col = "green") +
+#   geom_line(aes(x = year, y = upp_quart), col = "blue") +
+#   geom_line(aes(x = year, y = low_quart), col = "red") +
+#   scale_x_continuous(labels = as.character(broad_df_inter_long$year), 
+#                      breaks = broad_df_inter_long$year) +
+#   labs(x = "Year", y = k) +
+#   theme(axis.text.x = element_text(angle = 90))
+# }
+# 
+# do.call(grid.arrange, c(plist, ncol = 2))
+
+# Entity heterogeneity
+# broad_df %>%
+#   group_by(year) %>%
+#   summarise(pub_mean = log(mean(public_welfare_services_facilities_pc, na.rm = TRUE)*1000)) %>%
+#   left_join(broad_df) %>%
+#   ggplot(data = ., 
+#          aes(x = year, y = log(public_welfare_services_facilities_pc*1000))) +
+#   geom_point() +
+#   geom_line(aes(x = year, y = pub_mean), col = "blue") +
+#   scale_x_continuous(labels = as.character(broad_df$year), 
+#                      breaks = broad_df$year) +
+#   labs(x = "Year", y = "Public Welfare, Services, Facilities") +
+#   theme(axis.text.x = element_text(angle = 90))
+
+```
+
 ### Common Time Trends
 ```{r}
 
 deps = broad_cats[grepl("pc", broad_cats)]
+ldeps = paste0(" ~ l(", deps, ")")
+forms = paste0(deps, paste0(" ~ l(", deps, ")"))
 
 # Expenditure across broad categories
-broad_plms <- feols(data = broad_df, .[deps]  ~ pinc_pc | fips + year, panel.id = c('year', 'fips'), se = "twoway")
-broad_plms_inter <- feols(data = broad_df_inter, .[deps]  ~ pinc_pc | fips + year, panel.id = c('year', 'fips'), se = "twoway")
+broad_plms <- feols(data = broad_df, .[deps] ~ time - 1, panel.id = c('year', 'fips'), se = "twoway")
+broad_plms_inter <- feols(data = broad_df_inter, .[deps]  ~ pinc_k_pc | fips + year, panel.id = c('year', 'fips'), se = "twoway")
+
+feols(data = broad_df, administration_misc_pc  ~ l(administration_misc_pc) | fips , panel.id = c('year', 'fips'), se = "twoway")
 
 
 # Total expenditure
-tot_mod_pc <- feols(data = tots, amount_pc ~ pinc_pc | fips + year, panel.id = c('year', 'fips'), se = "twoway")
-tot_inter_pc <- create_res(df = inter_tots, amount_pc ~ pinc_pc | fips + year, panel.id = c('year', 'fips'), se = "twoway")
+tot_mod_pc <- feols(data = tots, amount_pc ~ pinc_k_pc | fips + year, panel.id = c('year', 'fips'), se = "twoway")
+tot_inter_pc <- create_res(df = inter_tots, amount_pc ~ pinc_k_pc | fips + year, panel.id = c('year', 'fips'), se = "twoway")
 
 
 ```
