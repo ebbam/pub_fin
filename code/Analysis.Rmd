@@ -33,6 +33,7 @@ library(DiagrammeR)
 library(gstat)
 library(readxl)
 library(plm)
+library(modelsummary)
 
 ```
 
@@ -705,10 +706,127 @@ ar <- feols(data = broad_df, public_welfare_services_facilities_pc*1000 ~ time +
 ar_twfe <- feols(data = broad_df, public_welfare_services_facilities_pc*1000 ~ l(public_welfare_services_facilities_pc) | fips + year, panel.id = c('year', 'fips'), se = "twoway")
 ```
 
+# Preliminary Shift-Share Treatment Results
+Preliminary model results making use of shift-share instruments in employment and wage changes coming from coal, extraction, and oil & gas industries. 
+
+The models below use a 2SLS approach using the shift-share as an instrument for changes in employment and wages per industry per county. Each model employs county- and year-fixed effects with two-way clustering of the standard errors.
+
+The first section uses overall public expenditure as a dependent variable. The second section breaks this expenditure down into the four categories mentioned above. 
+
+*Next steps:*          
+- Reconsider control variables beyond county-level personal income.      
+- Replace personal income with GDP now that time series is shortened as a consequence of data availability in the shift-share instrument).        
+- Experiment with different lags of the independent variable (currently assumes same-period change).      
+- Experiment with different base years for the shift-share instrument (currently constructed from base year 2001).   
+
+## Overall Public Expenditure
+
+```{r, echo = FALSE, message = FALSE}
+
+
+shift_shares <- readRDS(here('data/temp/shift_shares_2001_base.RDS')) %>% 
+  mutate(fips = ifelse(fips == "15009", "15901", fips))
+  
+
+dict = c(pinc_k_pc = "Personal Income (pc_k)",
+         fd_total_annual_wages_2121 = "Wage Coal (FD)",
+         fd_total_annual_wages_21 = "Wage Extract. (FD)",
+         fd_total_annual_wages_211 = "Wage O&G (FD)",
+         fd_annual_avg_emplvl_2121 = "Emp. Coal (FD)",
+         fd_annual_avg_emplvl_21 = "Emp. Extract. (FD)", 
+         fd_annual_avg_emplvl_211 = "Emp. O&G (FD)",
+         # All in pc_exp
+         "administration_misc_pc*1000" = "Admin&Misc",
+         "commercial_pc*1000 "= "Commercial",
+         "infrastructure_utilities_regulation_pc*1000" = "Infr,Util,Reg",
+         "public_welfare_services_facilities_pc*1000" = "Welf,Serv,Facil",
+         amount_pc = "Tot. Pub. Exp (PC)"
+         )
+setFixest_dict(dict)
+  
+tots_df_ss <- inter_tots %>% 
+  filter(year >= 2001) %>% 
+  left_join(., shift_shares, by = c("fips", "year"))
+
+iv_forms <- paste0(" ~ -1 + pinc_k_pc | fips + year ", c(" | fd_total_annual_wages_2121 ~ ss_wage_coal",
+                     "| fd_total_annual_wages_21 ~ ss_wage_extraction",
+                     "| fd_total_annual_wages_211 ~ ss_wage_oil_gas",
+                     "| fd_annual_avg_emplvl_2121 ~ ss_emp_coal",
+                    "| fd_annual_avg_emplvl_21 ~ ss_emp_extraction", 
+                    "| fd_annual_avg_emplvl_211 ~ ss_emp_oil_gas"))
+
+names(iv_forms) <- c("wage_coal", "wage_extraction", "wage_oil_gas", "emp_coal", "emp_extraction", "emp_oil_gas")
+#ss_emp_ff ~ fd_annual_avg_emplvl_XX, 
+#ss_wage_ff ~ fd_annual_wages_XX, 
+
+
+mods_pub_exp_total <- list()
+for(form in iv_forms){
+    forms <- paste0("amount_pc", form)
+    mods_pub_exp_total[[paste0(names(iv_forms[iv_forms == form]))]] <- feols(data = tots_df_ss, as.formula(forms), panel.id = c('year', 'fips'), se = "twoway")
+  }
+
+#setFixest_etable(markdown = TRUE, page.width = "a4") #style.tex = my_style, 
+
+print("TOTAL PUBLIC EXPENDITURE (PC)")
+mods_pub_exp_total %>% etable(order = "!Personal")
+
+
+
+```
+
+
+## Granular Categories
+```{r, echo = FALSE, message = FALSE}
+
+broad_df_ss <- broad_df_inter %>% 
+  filter(year >= 2001) %>% 
+  left_join(., shift_shares, by = c("fips", "year"))
+
+iv_forms <- paste0(" ~ -1 + pinc_k_pc | fips + year ", c(" | fd_total_annual_wages_2121 ~ ss_wage_coal",
+                     "| fd_total_annual_wages_21 ~ ss_wage_extraction",
+                     "| fd_total_annual_wages_211 ~ ss_wage_oil_gas",
+                     "| fd_annual_avg_emplvl_2121 ~ ss_emp_coal",
+                    "| fd_annual_avg_emplvl_21 ~ ss_emp_extraction", 
+                    "| fd_annual_avg_emplvl_211 ~ ss_emp_oil_gas"))
+
+names(iv_forms) <- c("wage_coal", "wage_extraction", "wage_oil_gas", "emp_coal", "emp_extraction", "emp_oil_gas")
+#ss_emp_ff ~ fd_annual_avg_emplvl_XX, 
+#ss_wage_ff ~ fd_annual_wages_XX, 
+
+for(dep in deps[deps != "pinc_k_pc*1000"]){
+  temp_list <- list()
+  nam <- paste0("mods_", str_sub(dep, end=-6))
+  for(form in iv_forms){
+    forms <- paste0(dep, form)
+    temp_list[[paste0(names(iv_forms[iv_forms == form]),"_", str_sub(dep, end=-6))]] <- feols(data = broad_df_ss, as.formula(forms), panel.id = c('year', 'fips'), se = "twoway")
+  }
+  assign(nam, temp_list)
+}
+
+print("ADMINISTRATION & MISC EXPENDITURE (PC)")
+mods_administration_misc_pc %>% etable(order = "!Personal")
+
+print("COMMERCIAL EXPENDITURE (PC)")
+mods_commercial_pc %>% etable(order = "!Personal")
+
+print("INFRASTRUCTURE, UTILITIES & REGULATION (PC)")
+mods_infrastructure_utilities_regulation_pc %>% etable(order = "!Personal")
+
+print("PUBLIC WELFARE, SERVICES & FACILITIES (PC)")
+mods_public_welfare_services_facilities_pc %>% etable(order = "!Personal")
+
+```
+
+
+
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE, cache = TRUE, include = FALSE, eval = FALSE}
+
 # Time heterogeneity (work in progress)
 Shows distribution of expenditure per capita values across counties over time. The green line denotes the annual mean value, blue line denotes the top quartile, and red line denotes the bottom quartile. 
 
-```{r, echo = FALSE, message = FALSE, warning = FALSE, cache = TRUE, include = FALSE, eval = FALSE}
+
 broad_df_inter_long <- broad_df_inter %>% 
   select(fips, year, administration_misc_pc, 
          commercial_pc, infrastructure_utilities_regulation_pc, 
@@ -744,11 +862,13 @@ do.call(grid.arrange, c(plist, ncol = 2))
 ```
 
 
+
+```{r, include = FALSE, eval = FALSE}
+
 ## NEXT...
 ### Factor Analysis
 
 ### Spatial Analysis
-```{r, include = FALSE, eval = FALSE}
 
 # Sample code from coal paper
 library(gstat)
