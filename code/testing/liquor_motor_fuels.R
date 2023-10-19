@@ -39,7 +39,7 @@ fuels_tax_state <- read.csv(here("data/raw/StateData/StateData.csv")) %>%
   mutate(motor_fuels_tax_pc = Motor_Fuels_Tax/pop,
          log_motor_fuels_tax_pc = log(motor_fuels_tax_pc))
 
-pdf(here("output/motor_fuel_taxes_overview.pdf"), onefile = TRUE)
+pdf(here("code/testing/motor_fuel_taxes_overview.pdf"), onefile = TRUE)
 
 k1 <-  fuels_tax_state %>%
   pivot_longer(cols = c(Motor_Fuels_Tax, log_fuels_tax)) %>%
@@ -91,7 +91,7 @@ grid.arrange(grobs = list(mean_70_20, mean_pc_70_20))
 #     t.pval = 0.01
 #   )
 # 
-# saveRDS(breaks_fuels_tax, here("output/breaks_fuel_tax.RDS"))
+# saveRDS(breaks_fuels_tax, here("code/testing/breaks_fuel_tax.RDS"))
 # # plot(breaks_fuels_tax)
 # 
 dev.off()
@@ -121,7 +121,7 @@ liquor_rev_state <- read.csv(here("data/raw/StateData/StateData.csv")) %>%
   mutate(liquor_stores_rev_pc = Liquor_Stores_Revenue/pop,
          log_liquor_stores_rev_pc = log(liquor_stores_rev_pc))
 
-pdf(here("output/liquor_stores_rev_overview.pdf"), onefile = TRUE)
+pdf(here("code/testing/liquor_stores_rev_overview.pdf"), onefile = TRUE)
 
 j1 <- liquor_rev_state %>%
   pivot_longer(cols = c(Liquor_Stores_Revenue, log_liquor_rev)) %>%
@@ -174,7 +174,7 @@ grid.arrange(grobs = list(mean_70_20, mean_pc_70_20))
 #     t.pval = 0.01
 #   )
 # 
-# saveRDS(breaks_liquor_rev, here("output/breaks_liquor.RDS"))
+# saveRDS(breaks_liquor_rev, here("code/testing/breaks_liquor.RDS"))
 
  
 #plot(breaks_liquor_rev)
