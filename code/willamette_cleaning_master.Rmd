@@ -14,6 +14,9 @@ library(gridExtra)
 library(readr)
 library(data.table)
 library(openxlsx)
+library(usmap)
+library(gets)
+library(getspanel)
 
 ```
 
@@ -46,12 +49,13 @@ temper <- temp_county %>%
   # Fixes inconsistent FIPS code for KETCHIKAN GATEWAY BOROUGH; FIPS changes in 2007 - verified that population total is consistent at time of switch (ie. unlikely there is a regrouping of counties)
   mutate(fips = ifelse(county_name == "KETCHIKAN GATEWAY BOROUGH", "02130", fips))
 
-py_test <- readRDS(here("data/temp/county_py_test.rds"))
+py_test <- read.csv(here("data/temp/county_py_test.csv"))
 #test <- read.csv(here("data/temp/county_py_test.csv"))
 
 #temper %>% write.csv(here("data/temp/temper_r_test.csv"))
 
-#test %>% as.data.frame %>% select(c("year", "county_name", "item_formal", "amount")) #%>% all.equal(select(temper, c("year", "county_name", "item_formal", "amount"))
+py_test %>% as.data.frame %>% select(c("year", "county_name", "item_formal", "amount")) %>% 
+  all.equal(select(temper, c("year", "county_name", "item_formal", "amount"))
 
 ```
 
@@ -86,10 +90,190 @@ county_full <- temper %>%
 
 ```
 
-# Revenue data 2000-2020
+# Revenue data 1970-2020
 ```{r}
 
+# Combine item codes with database and filter on revenue
+county_rev <- temper %>% 
+  mutate(item = tolower(item_formal)) %>% 
+  left_join(., item_codes, by = "item") %>% 
+  filter(rev_exp_debt == "revenue")
 
+county_rev %>% 
+  filter(item == "motor_fuels_tax") %>% 
+  ggplot(aes(x = year, y = amount, group = fips)) + 
+    geom_line(aes(color = fips))
+
+
+```
+
+# State level expenditure
+```{r}
+library(tidycensus)
+data(fips_codes)
+getstate <- fips_codes$state
+names(getstate) <- fips_codes$state_code
+
+pop <- readRDS(here('data/temp/pubexp_1970_2020.RDS')) %>% 
+  select(fips, fips_state, pop, year) %>% 
+  distinct %>% 
+  group_by(fips_state, year) %>% 
+  summarise(pop = sum(pop, na.rm = TRUE)) %>% 
+  rename(state_code = fips_state)
+```
+
+# Motor fuels taxes: State level
+```{r}
+fuels_tax_state <- read.csv(here("data/raw/StateData/StateData.csv")) %>% 
+  tibble %>% 
+  filter(Year4 >= 1977) %>% 
+  select(State_Code, Year4, Motor_Fuels_Tax) %>% 
+  rename(year = Year4) %>% 
+  mutate(log_fuels_tax = log(Motor_Fuels_Tax),
+         state_code = ifelse(nchar(as.character(State_Code)) == 1, paste0("0", as.character(State_Code)), as.character(State_Code)),
+         state = getstate[state_code]) %>% 
+  # Removes Samoa, Canal Zone, Guam, Puerto Rico
+  filter(!(state_code %in% c("03", "07", "14", "43")))  %>% 
+   left_join(., pop, by = c("state_code", "year")) %>% 
+  mutate(motor_fuels_tax_pc = Motor_Fuels_Tax/pop,
+         log_motor_fuels_tax_pc = log(motor_fuels_tax_pc))
+
+pdf(here("output/motor_fuel_taxes_overview.pdf"), onefile = TRUE)
+
+fuels_tax_state %>% 
+  pivot_longer(cols = c(Motor_Fuels_Tax, log_fuels_tax)) %>% 
+  ggplot(aes(x = year, y = value, color = state)) +
+  geom_line() +
+  facet_wrap(~name, scales = "free") +
+  labs(y = "Gross amount", x = "Year", title = "Total revenue earned from motor fuels taxes by state")
+
+fuels_tax_state %>% 
+  pivot_longer(cols = c(log_motor_fuels_tax_pc, motor_fuels_tax_pc)) %>% 
+  ggplot(aes(x = year, y = value, color = state)) +
+  geom_line() +
+  facet_wrap(~name, scales = "free") +
+  labs(y = "Gross amount per capita", x = "Year", title = "Total revenue earned from motor fuels taxes by state (PC)")
+
+mean_70_20 <- fuels_tax_state %>% 
+  group_by(state) %>% 
+  summarise(mean_fuels_tax = mean(log(Motor_Fuels_Tax))) %>%
+  plot_usmap(data = ., values = "mean_fuels_tax", regions = "states", col = "gray90", linewidth = 0.01) +
+    scale_fill_distiller(palette = "Purples", name = "", direction = 1, na.value = "gray90") +
+    theme(panel.background = element_rect(color = "white", fill = "white"),
+          plot.title = element_text(face = "bold"), legend.background=element_blank()) +
+    labs(title = "Mean motor fuels tax revenue by state 1970-2020 (log)")
+
+mean_pc_70_20 <- fuels_tax_state %>% 
+  group_by(state) %>% 
+  summarise(mean_fuels_tax_pc = mean(log(motor_fuels_tax_pc))) %>%
+  plot_usmap(data = ., values = "mean_fuels_tax_pc", regions = "states", col = "gray90", linewidth = 0.01) +
+    scale_fill_distiller(palette = "Greens", name = "", direction = 1, na.value = "gray90") +
+    theme(panel.background = element_rect(color = "white", fill = "white"),
+          plot.title = element_text(face = "bold"), legend.background=element_blank()) +
+    labs(title = "Mean motor fuels tax revenue by state 1970-2020 (PC log)")
+
+ grid.arrange(grobs = list(mean_70_20, mean_pc_70_20))
+  
+ 
+
+
+breaks_fuels_tax <- fuels_tax_state %>%
+  isatpanel(
+      data = .,
+      formula = as.formula(log_fuels_tax ~ 1),
+      index = c("state", "year"),
+      effect = "twoways",
+      iis = TRUE,
+      fesis = TRUE,
+      t.pval = 0.01
+    )
+  
+  
+plot(breaks_fuels_tax)
+
+dev.off()
+  
+
+
+```
+
+# Liquor Sales: 
+```{r}
+
+# Not complete at the county level: only 2000 observations from 1970-2020 and 3000+ counties
+
+temp_county %>% 
+  select(FIPS_Combined, Year4, Liquor_Stores_Revenue) %>% 
+  filter(Liquor_Stores_Revenue != 0)
+
+# Try state level
+liquor_rev_state <- read.csv(here("data/raw/StateData/StateData.csv")) %>% 
+  tibble %>% 
+  select(State_Code, Year4, Liquor_Stores_Revenue) %>% 
+  rename(year = Year4) %>% 
+  mutate(log_liquor_rev = log(Liquor_Stores_Revenue),
+         state_code = ifelse(nchar(as.character(State_Code)) == 1, paste0("0", as.character(State_Code)), as.character(State_Code)),
+         state = getstate[state_code]) %>% 
+  # Removes Samoa, Canal Zone, Guam, Puerto Rico
+  filter(!(state_code %in% c("03", "07", "14", "43")))  %>% 
+   left_join(., pop, by = c("state_code", "year")) %>% 
+  mutate(liquor_stores_rev_pc = Liquor_Stores_Revenue/pop,
+         log_liquor_stores_rev_pc = log(liquor_stores_rev_pc))
+
+pdf(here("output/liquor_stores_rev_overview.pdf"), onefile = TRUE)
+
+liquor_rev_state %>% 
+  pivot_longer(cols = c(Liquor_Stores_Revenue, log_liquor_rev)) %>% 
+  ggplot(aes(x = year, y = value, color = state)) +
+  geom_line() +
+  facet_wrap(~name, scales = "free") +
+  labs(y = "Gross amount", x = "Year", title = "Total liquor store revenue by state")
+
+liquor_rev_state %>% 
+  pivot_longer(cols = c(log_liquor_stores_rev_pc, liquor_stores_rev_pc)) %>% 
+  ggplot(aes(x = year, y = value, color = state)) +
+  geom_line() +
+  facet_wrap(~name, scales = "free") +
+  labs(y = "Gross amount per capita", x = "Year", title = "Total liquor store revenue by state (PC)")
+
+mean_70_20 <- liquor_rev_state %>% 
+  group_by(state) %>% 
+  summarise(mean_liquor_rev = mean(log(Liquor_Stores_Revenue))) %>%
+  plot_usmap(data = ., values = "mean_liquor_rev", regions = "states", col = "gray90", linewidth = 0.01) +
+    scale_fill_distiller(palette = "Purples", name = "", direction = 1, na.value = "gray90") +
+    theme(panel.background = element_rect(color = "white", fill = "white"),
+          plot.title = element_text(face = "bold"), legend.background=element_blank()) +
+    labs(title = "Mean liquor store revenue by state 1970-2020 (log)")
+
+mean_pc_70_20 <- liquor_rev_state %>% 
+  group_by(state) %>% 
+  summarise(mean_liquor_rev_pc = mean(log(liquor_stores_rev_pc))) %>%
+  plot_usmap(data = ., values = "mean_liquor_rev_pc", regions = "states", col = "gray90", linewidth = 0.01) +
+    scale_fill_distiller(palette = "Greens", name = "", direction = 1, na.value = "gray90") +
+    theme(panel.background = element_rect(color = "white", fill = "white"),
+          plot.title = element_text(face = "bold"), legend.background=element_blank()) +
+    labs(title = "Mean liquor store revenue by state 1970-2020 (PC log)")
+
+ grid.arrange(grobs = list(mean_70_20, mean_pc_70_20))
+  
+
+
+breaks_liquor_rev <- liquor_rev_state %>%
+  isatpanel(
+      data = .,
+      formula = as.formula(log_liquor_rev ~ 1),
+      index = c("state", "year"),
+      effect = "twoways",
+      iis = TRUE,
+      fesis = TRUE,
+      t.pval = 0.01
+    )
+  
+  
+plot(breaks_liquor_rev)
+
+dev.off()
+  
 
 ```
 

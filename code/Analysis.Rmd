@@ -725,7 +725,9 @@ The first section uses overall public expenditure as a dependent variable. The s
 
 
 shift_shares <- readRDS(here('data/temp/shift_shares_2001_base.RDS')) %>% 
-  mutate(fips = ifelse(fips == "15009", "15901", fips))
+  mutate(fips = ifelse(fips == "15009", "15901", fips),
+         fd_total_annual_wages_2121_k = fd_total_annual_wages_2121/1000,
+         ss_wage_coal_k = ss_wage_coal1000)
   
 
 dict = c(pinc_k_pc = "Personal Income (pc_k)",
@@ -747,6 +749,12 @@ setFixest_dict(dict)
 tots_df_ss <- inter_tots %>% 
   filter(year >= 2001) %>% 
   left_join(., shift_shares, by = c("fips", "year"))
+
+test <- feols(data = tots_df_ss, as.formula("amount_pc ~ -1 + pinc_k_pc | fips + year | fd_total_annual_wages_2121_k ~ ss_wage_coal_k"), panel.id = c('year', 'fips'), se = "twoway")
+
+test %>% etable
+              
+              
 
 iv_forms <- paste0(" ~ -1 + pinc_k_pc | fips + year ", c(" | fd_total_annual_wages_2121 ~ ss_wage_coal",
                      "| fd_total_annual_wages_21 ~ ss_wage_extraction",

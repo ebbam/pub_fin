@@ -9,4 +9,4 @@ cache
 **/.Rapp.history
 
 data/raw/QCEW/*annual.singlefile.csv
-data/raw/QCEW/zips/
+data/raw/QCEW/zips/.DS_store
