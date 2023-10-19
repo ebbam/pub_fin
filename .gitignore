@@ -8,4 +8,5 @@ cache
 **/.DS_Store
 **/.Rapp.history
 
-data/raw/CountyData.csv
+data/raw/QCEW/*annual.singlefile.csv
+data/raw/QCEW/zips/
