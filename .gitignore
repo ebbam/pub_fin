@@ -8,5 +8,17 @@ cache
 **/.DS_Store
 **/.Rapp.history
 
+**/*_cache/
+**/*_files/
+
 data/raw/QCEW/*annual.singlefile.csv
 data/raw/QCEW/zips/.DS_store
+
+
+
+data/raw/BEA_county_econ_stats/CAEMP25N/*
+data/raw/BEA_county_econ_stats/CAINC*/*
+!data/raw/BEA_county_econ_stats/*/*.xml
+!data/raw/BEA_county_econ_stats/*/*.html
+!data/raw/BEA_county_econ_stats/*/*.zip
+!data/raw/BEA_county_econ_stats/*/*ALL_AREAS*
