@@ -60,7 +60,8 @@ names(getfips) <- bea_fips$FIPS
 dfi <- readRDS(here("data/temp/pubexp_1970_2020.RDS")) %>% 
   mutate(fips = ifelse(fips %in% names(getfips), unname(getfips[fips]), fips))
 
-controls <- readRDS(here("data/temp/cainc30_controls.rds"))
+controls <- readRDS(here("data/temp/cainc30_controls.rds")) %>% 
+  left_join(readRDS(here("data/temp/gdp_controls.RDS")), by = c("fips", "year"))
 
 map_cats <- unique(dfi$sum_category) 
 

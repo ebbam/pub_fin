@@ -812,6 +812,56 @@ cainc91 <- read.csv(here("data/raw/BEA_county_econ_stats/CAINC91/CAINC91__ALL_AR
 
 ```
 
+# County GDP and Real GDP
+Source: BEA https://apps.bea.gov/regional/downloadzip.cfm
+```{r}
+
+gdp <- read.csv(here("data/raw/CAGDP2/CAGDP2__ALL_AREAS_2001_2021.csv"), colClasses = c("GeoFIPS" = "character"), nrows = 108052) %>% 
+  tibble %>% 
+  mutate(fips = trimws(GeoFIPS)) %>% 
+  # Filter out national and state-wide totals
+  # LineCode 1 corresponds to total GDP
+  # LineCode 2 Private industry total
+  # LineCode 6 Mining, quarrying, and oil & gas extraction
+  # LineCode 83 is Government and government enterprises
+  filter(substr(fips, 3,5) != "000" & LineCode %in% c(1, 2, 6, 83)) %>%
+  select(-c(Unit, IndustryClassification, TableName, Region, GeoFIPS, GeoName, LineCode)) %>% 
+  relocate(fips, Description) %>% 
+  mutate(Description = case_when(Description == "All industry total " ~ "total", 
+                                 Description == " Private industries " ~ "priv_ind", 
+                                 Description == "  Mining, quarrying, and oil and gas extraction " ~ "o_g_mining_quarr_21", 
+                                 Description == "Government and government enterprises "  ~ "govt")) %>%
+  pivot_longer(cols = starts_with("X"), names_to = "year", values_to = "value", names_prefix = "X") %>% 
+  pivot_wider(id_cols = c("fips", "year"), values_from = value, names_from = Description, names_glue = "gdp_{Description}") %>%
+  mutate(across(!fips, ~as.numeric(.x)))
+
+
+full_gdp <- read.csv(here("data/raw/CAGDP9/CAGDP9__ALL_AREAS_2001_2021.csv"), colClasses = c("GeoFIPS" = "character"), nrows = 108052) %>% 
+  tibble %>%
+  mutate(fips = trimws(GeoFIPS)) %>%
+  # Filter out national and state-wide totals
+  # LineCode 1 corresponds to total GDP
+  # LineCode 2 Private industry total
+  # LineCode 6 Mining, quarrying, and oil & gas extraction
+  # LineCode 83 is Government and government enterprises
+  filter(substr(fips, 3,5) != "000" & LineCode %in% c(1, 2, 6, 83)) %>% 
+  select(-c(Unit, IndustryClassification, TableName, Region, GeoFIPS, GeoName, LineCode)) %>% 
+  relocate(fips, Description) %>%
+  mutate(Description = case_when(Description == "All industry total " ~ "total", 
+                                 Description == " Private industries " ~ "priv_ind", 
+                                 Description == "  Mining, quarrying, and oil and gas extraction " ~ "o_g_mining_quarr_21", 
+                                 Description == "Government and government enterprises "  ~ "govt")) %>% 
+  pivot_longer(cols = starts_with("X"), names_to = "year", values_to = "value", names_prefix = "X") %>% 
+  pivot_wider(id_cols = c("fips", "year"), values_from = value, names_from = Description, names_glue = "real_gdp_{Description}") %>%
+  mutate(across(!fips, ~as.numeric(.x))) %>% 
+  left_join(., gdp, by = c("fips", "year"))
+
+
+#full_gdp %>% saveRDS(here("data/temp/gdp_controls.RDS"))
+
+```
+
+
 # County Totals
 ```{r}
 temp_tot <- full_totals %>% 
