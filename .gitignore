@@ -11,10 +11,7 @@ cache
 **/*_cache/
 **/*_files/
 
-data/raw/QCEW/*annual.singlefile.csv
-data/raw/QCEW/zips/.DS_store
-
-
+data/raw/QCEW/
 
 data/raw/BEA_county_econ_stats/CAEMP25N/*
 data/raw/BEA_county_econ_stats/CAINC*/*
@@ -22,3 +19,10 @@ data/raw/BEA_county_econ_stats/CAINC*/*
 !data/raw/BEA_county_econ_stats/*/*.html
 !data/raw/BEA_county_econ_stats/*/*.zip
 !data/raw/BEA_county_econ_stats/*/*ALL_AREAS*
+
+
+data/raw/CAGDP?/*
+!data/raw/CAGDP?/*/*.xml
+!data/raw/CAGDP?/*/*.html
+!data/raw/CAGDP?/*/*.zip
+!data/raw/CAGDP?/*/*ALL_AREAS*
