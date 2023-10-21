@@ -1,5 +1,6 @@
 # Dictionaries and functions
 # called in other scripts
+library(tidycensus)
 
 # Function to get states from state fips codes
 data(fips_codes)
