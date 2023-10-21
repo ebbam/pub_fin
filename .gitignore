@@ -26,3 +26,6 @@ data/raw/CAGDP?/*
 !data/raw/CAGDP?/*/*.html
 !data/raw/CAGDP?/*/*.zip
 !data/raw/CAGDP?/*/*ALL_AREAS*
+
+
+data/temp/qcew_compiled_raw_ff.RDS
