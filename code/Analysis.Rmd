@@ -2,7 +2,9 @@
 title: "Descriptive Analysis"
 author: "Ebba Mark"
 date: "`r Sys.Date()`"
-output: html_document
+output: 
+  html_document:
+    toc: true
 ---
 
 # Overview 
@@ -34,38 +36,54 @@ library(gstat)
 library(readxl)
 library(plm)
 library(modelsummary)
+library(pdftools)
+library(tinytex)
+library(pander)
 
 ```
 
 ```{r functions}
-data(fips_codes)
-getstate <- fips_codes$state
-names(getstate) <- fips_codes$state_code
 
-
-tem <- data.frame(state.x77)               # Transform matrix into data frame
-sta <- cbind(state.abb, tem, state.region) # Combine the three data sets
-colnames(sta)[1] <- "State"                # Rename first column
-colnames(sta)[10] <- "Region"              # Rename the 10th column
-getregion <- sta$Region
-names(getregion) <- sta$State
-
-bea_fips <- read_excel(here("data/out/FIPSModificationsVA.xlsx"), skip = 1, col_types = c("text", "text","text","text"))
-getfips <- bea_fips$`BEA FIPS`
-names(getfips) <- bea_fips$FIPS
+source(here('code/dicts.R'))
 
 ```
 
-```{r, message = FALSE, echo = FALSE, include = FALSE}
+# Data
+```{r, message = FALSE, echo = FALSE, include = FALSE, cache = TRUE}
+
+################################################################################
+############# COMPONENT DATASETS ###############################################
+# Main public expenditure dataset
 dfi <- readRDS(here("data/temp/pubexp_1970_2020.RDS")) %>% 
-  mutate(fips = ifelse(fips %in% names(getfips), unname(getfips[fips]), fips))
+  mutate(fips = ifelse(fips %in% names(getfips), unname(getfips[fips]), fips)) %>% 
+  filter(!(fips %in% c("46131", "51123")))
 
+# Main public revenue dataset
+dfi_rev <- readRDS(here('data/temp/county_rev.RDS')) %>% 
+  mutate(fips = ifelse(fips %in% names(getfips), unname(getfips[fips]), fips),
+         fips = case_when(fips == "46113" ~ "46102",
+                          # Maui is recorded in non-BEA records as fips 15009 + fips 15005. 
+                          # 15005 not present in public finance dataset so only 15009 is replaced
+                          fips == "15009" ~ "15901",
+                          TRUE ~ fips)) %>% 
+  filter(!(fips %in% c("46131", "51123"))) %>% 
+  pivot_wider(id_cols = c(fips, year, Population), names_from = "item", values_from = "amount") %>% 
+  mutate(across(total_revenue:unemp_federal_advances,.fns = ~./Population, .names = "{.col}_pc")) %>% 
+  complete(year, fips)
+
+# Control variables
 controls <- readRDS(here("data/temp/cainc30_controls.rds")) %>% 
-  left_join(readRDS(here("data/temp/gdp_controls.RDS")), by = c("fips", "year"))
+  left_join(readRDS(here("data/temp/gdp_controls.RDS")), by = c("fips", "year")) %>% 
+  left_join(readRDS(here("data/temp/econ_div_controls.RDS")), by = c("fips", "year")) %>% 
+  filter(!(fips %in% c("46131", "51123")))
 
-map_cats <- unique(dfi$sum_category) 
+# Shift share instruments
+shift_shares <- readRDS(here('data/temp/shift_shares_base_01_05_11.RDS')) %>% 
+  mutate(fips = ifelse(fips == "15009", "15901", fips))  %>% 
+  filter(!(fips %in% c("46131", "51123")))
 
-cats_clean <- lapply(map_cats, function(x) tolower(gsub("__", "_", gsub(",|&", "", gsub(" ", "_", x)))))
+################################################################################
+############# CATEGORIZATION ###################################################
 
 # Expenditure categories data: Raw data
 temp <- dfi %>% 
@@ -75,7 +93,7 @@ temp <- dfi %>%
   select(-Population) %>% 
   clean_names
 
-temp %>% summarise(across(8:41, ~sum(is.na(.x))))
+# temp %>% summarise(across(8:41, ~sum(is.na(.x))))
 
 # Expenditure categories data: Linearly Interpolated Data
 inter_temp <- temp %>%
@@ -85,12 +103,12 @@ inter_temp <- temp %>%
   mutate(across(where(is.numeric), ~na.approx(., rule = 2))) %>%
   ungroup
 
-temp %>% summarise(across(everything(), ~sum(is.na(.x))))
-# 70% complete cases
-temp %>% filter(complete.cases(.)) %>% nrow(.)/nrow(temp)
-
-inter_temp %>% summarise(across(8:41, ~sum(is.na(.x))))
-inter_temp %>% filter(complete.cases(.)) %>% nrow(.)/nrow(inter_temp)
+# temp %>% summarise(across(everything(), ~sum(is.na(.x))))
+# # 70% complete cases
+# temp %>% filter(complete.cases(.)) %>% nrow(.)/nrow(temp)
+# 
+# inter_temp %>% summarise(across(8:41, ~sum(is.na(.x))))
+# inter_temp %>% filter(complete.cases(.)) %>% nrow(.)/nrow(inter_temp)
 
 # Broad expenditure categories data
 temp_dfi <- dfi %>% 
@@ -114,7 +132,43 @@ temp_dfi <- dfi %>%
                                                    "Utilities",
                                                    "Police, Corrections & Judicial") ~ "Infrastructure, Utilities & Regulation"),
          state = getstate[fips_state],
-         region = getregion[state])
+         region = getregion[state]) %>% 
+  filter(!(state %in% c("AK", "HI")))
+
+################################################################################
+############# BROAD CATEGORIES #################################################
+
+broad_df <- temp_dfi %>% 
+  group_by(year, broad_cat, fips) %>%
+  mutate(amount = sum(amount, na.rm = TRUE),
+         population = sum(pop, na.rm = TRUE)) %>%
+  ungroup %>% 
+  select(-sum_category) %>% 
+  distinct %>% 
+  mutate(amount_pc = amount/population) %>% 
+  complete(fips, year, broad_cat) %>% 
+  rename(tot = amount, pc = amount_pc) %>%
+  pivot_wider(id_cols = c(fips, year), names_from = broad_cat, values_from = c(tot, pc), names_glue = "{broad_cat}_{.value}") %>% 
+  clean_names %>% arrange(fips, year) %>% 
+  left_join(., controls, by = c('fips', 'year')) %>% 
+  mutate(time = year - 1970, 
+         state = getstate[substr(fips, 1,2)],
+         region = getregion[state]) %>% 
+  mutate(across(real_gdp_total:gdp_govt, ~./population_persons, .names = "{col}_pc"))
+
+broad_df_inter <- broad_df %>% 
+  group_by(fips) %>%
+  mutate(across(where(is.numeric), ~ ifelse(!(all(is.na(.) | . == 0)) & . == 0, NA, .))) %>%
+  mutate(across(where(is.numeric), ~na.approx(., rule = 2))) %>%
+  ungroup
+
+
+broad_df_ss <- broad_df_inter %>% 
+  filter(year >= 2001) %>% 
+  left_join(., shift_shares, by = c("fips", "year"))
+
+################################################################################
+############# TOTAL PUBLIC EXPENDITURE #########################################
 
 # Total Expenditure data: Raw
 tots <- readRDS(here("data/temp/pubexp_1970_2020_totals.RDS")) %>% 
@@ -127,12 +181,14 @@ tots <- readRDS(here("data/temp/pubexp_1970_2020_totals.RDS")) %>%
          region = getregion[state],
          amount_pc = amount/pop,
          time = year - 1970) %>% 
-    left_join(., controls, by = c('fips', 'year'))
+    left_join(., controls, by = c('fips', 'year')) %>% 
+  mutate(across(real_gdp_total:gdp_govt, ~./pop, .names = "{col}_pc")) %>% 
+  filter(!(fips %in% c("46131", "51123")))
 
-tots %>% summarise(across(everything(), ~sum(is.na(.x))))
-# 70% complete cases
-tots %>% filter(complete.cases(.)) %>% nrow(.)/nrow(temp)
-tots %>% select(fips, year, amount) %>% filter(!complete.cases(.)) %>% pull(year) %>% unique
+# tots %>% summarise(across(everything(), ~sum(is.na(.x))))
+# # 70% complete cases
+# tots %>% filter(complete.cases(.)) %>% nrow(.)/nrow(temp)
+# tots %>% select(fips, year, amount) %>% filter(!complete.cases(.)) %>% pull(year) %>% unique
 
 # Total Expenditure data: Linearly interpolated
 inter_tots <- tots %>% 
@@ -142,13 +198,74 @@ inter_tots <- tots %>%
   mutate(across(where(is.numeric), ~ na.approx(., rule = 2))) %>%
   ungroup
 
+tots_df_ss <- inter_tots %>% 
+  filter(year >= 2001) %>% 
+  left_join(., shift_shares, by = c("fips", "year"))
+
+
+################################################################################
+############# TOTAL PUBLIC REVENUE #########################################
+
+rev_df <- dfi_rev %>% 
+  select(year, fips, contains("total_rev"), contains("tax"), 
+         contains("general_revenue"), contains("gen_rev_own_sources"), contains("corporation_license"),
+         contains("public_utility_license"), contains("occup_and_bus_lic_nec"),
+         contains("total_income_taxes"), contains("interest_revenue"), 
+         contains("rents_and_royalties"), contains("liquor_stores_revenue"), 
+         contains("total_utility_revenue"), contains("water_utility_revenue"), 
+         contains("electric_utility_rev"), contains("gas_utility_rev"), 
+         contains("transit_utility_rev"), contains("total_insur_trust_rev"),
+         contains("total_unemp_rev"), contains("unemp_payroll_tax"), 
+         contains("unemp_int_revenue"), contains("unemp_federal_advances")) %>% 
+  left_join(., controls, by = c('fips', 'year')) %>% 
+  mutate(across(real_gdp_total:gdp_govt, ~./population_persons, .names = "{col}_pc")) %>% 
+  left_join(., shift_shares, by = c('fips', 'year')) %>% 
+  mutate(fips_state = substr(fips, 1,2),
+         state = getstate[fips_state],
+         region = getregion[state]) %>% 
+  filter(!(state %in% c("AK", "HI")),
+         year >= 2001)
+
+inter_rev <- dfi_rev %>% 
+  select(year, fips, contains("total_rev"), contains("tax"), 
+         contains("general_revenue"), contains("gen_rev_own_sources"), contains("corporation_license"),
+         contains("public_utility_license"), contains("occup_and_bus_lic_nec"),
+         contains("total_income_taxes"), contains("interest_revenue"), 
+         contains("rents_and_royalties"), contains("liquor_stores_revenue"), 
+         contains("total_utility_revenue"), contains("water_utility_revenue"), 
+         contains("electric_utility_rev"), contains("gas_utility_rev"), 
+         contains("transit_utility_rev"), contains("total_insur_trust_rev"),
+         contains("total_unemp_rev"), contains("unemp_payroll_tax"), 
+         contains("unemp_int_revenue"), contains("unemp_federal_advances")) %>% 
+  group_by(fips) %>% 
+  mutate(across(where(is.numeric), ~ ifelse(!(all(is.na(.) | . == 0)) & . == 0, NA, .))) %>%
+  mutate(across(where(is.numeric), ~na.approx(., rule = 2))) %>%
+  ungroup %>% 
+  left_join(., controls, by = c('fips', 'year')) %>% 
+  mutate(across(real_gdp_total:gdp_govt, ~./population_persons, .names = "{col}_pc")) %>% 
+  left_join(., shift_shares, by = c('fips', 'year')) %>% 
+  mutate(fips_state = substr(fips, 1,2),
+         state = getstate[fips_state],
+         region = getregion[state]) %>% 
+  filter(!(state %in% c("AK", "HI")),
+         year >= 2001)
+
+
+
+######## Clear up environment
+rm(shift_shares)
+rm(controls)
+rm(dfi_rev)
+rm(temp)
+rm(inter_temp)
+
 ```
 
 # Expenditure categories
 
 The data is currently structured in county-year pairs with observations for 17 public expenditure categories. I have manually grouped these 17 categories into 4 higher categories (that can be changed/redefined easily!). The tree structure below displays all categories and groupings. As currently thought out, any or a combination of these categories will serve as outcome/dependent variables.
 
-```{r}
+```{r, cache = TRUE}
 
 temp_short <- temp_dfi %>% 
   select(broad_cat, sum_category) %>% 
@@ -293,7 +410,7 @@ anim_save(here(paste0("output/mark/natl_counties_total_expenditure.gif")), gif_t
 
 The below plots provide aggregated geographical (national, state, regional) summaries of expenditure categories and shares to demonstrate the composition of national expenditure across the categories. The final two plots demonstrate the composition of expenditure within the Public Welfare, Services & Facilities category.
 
-```{r, warning=FALSE, message = FALSE}
+```{r, warning=FALSE, message = FALSE, cache = TRUE}
 
 # Total as recorded by region
 p1 <- tots %>% 
@@ -310,7 +427,7 @@ p1 <- tots %>%
 
 ```
 
-```{r, warning=FALSE, message = FALSE, echo = FALSE, fig.height = 8, fig.width = 8}
+```{r, warning=FALSE, message = FALSE, echo = FALSE, fig.height = 8, fig.width = 8, cache = TRUE}
 
 # National Expenditure per category (as calculated from expenditure categories)
 p3 <- dfi %>% 
@@ -421,32 +538,7 @@ p7
 
 ```
 
-```{r, echo = FALSE, message = FALSE, fig.height = 12}
-
-
-broad_df <- temp_dfi %>% 
-  group_by(year, broad_cat, fips) %>%
-  mutate(amount = sum(amount, na.rm = TRUE),
-         population = sum(pop, na.rm = TRUE)) %>%
-  ungroup %>% 
-  select(-sum_category) %>% 
-  distinct %>% 
-  mutate(amount_pc = amount/population) %>% 
-  complete(fips, year, broad_cat) %>% 
-  rename(tot = amount, pc = amount_pc) %>%
-  pivot_wider(id_cols = c(fips, year), names_from = broad_cat, values_from = c(tot, pc), names_glue = "{broad_cat}_{.value}") %>% 
-  clean_names %>% arrange(fips, year) %>% 
-  left_join(., controls, by = c('fips', 'year')) %>% 
-  mutate(time = year - 1970, 
-         state = getstate[substr(fips, 1,2)],
-         region = getregion[state])
-  
-
-broad_df_inter <- broad_df %>% 
-  group_by(fips) %>%
-  mutate(across(where(is.numeric), ~ ifelse(!(all(is.na(.) | . == 0)) & . == 0, NA, .))) %>%
-  mutate(across(where(is.numeric), ~na.approx(., rule = 2))) %>%
-  ungroup
+```{r, echo = FALSE, message = FALSE, fig.height = 12, cache = TRUE}
 
 broad_cats <- names(select(broad_df, -c(fips, year)))
 #broad_df %>% summarise(across(3:10, ~sum(is.na(.x))))
@@ -484,7 +576,7 @@ do.call(grid.arrange, c(vals_2017, ncol = 2, top = "2017 Values of Key Variables
 # Data Coverage
 One of the issues reported by the data collectors is that the surveys are only mandatory every 5 years. So, although data exists and is reported annually, there are several counties that do not report figures in many years. 30% of the panel values are missing due to this. I am unsure what to do with this information and whether there might be any fixes. Climate Econometrics uses indicator saturation to fill in missing values which I would be interested to try but I do not yet know if this is appropriate for this dataset (especially on outcome variables). In the below charts, I have provided a map that shows the proportion of each county's time series (1970-2020) that is missing. States outlined in red are top fossil-fuel producing states (Texas, Pennsylvania, Oklahoma, Wyoming, West Virginia, North Dakota, Nevada, New Mexico, Louisiana, Colorado). 
 
-```{r, message = FALSE, echo = FALSE, warning = FALSE}
+```{r, message = FALSE, echo = FALSE, warning = FALSE, cache = TRUE}
 # Max possible values in each year is : 58102
 # n_distinct(temp_dfi$fips) * n_distinct(temp_dfi$sum_category)
 
@@ -564,7 +656,7 @@ The following tables provide standard linear time trends evaluated in a county-f
 
 *Note: Amount pc denotes total public expenditure and Pinc K denotes personal income per capita (as GDP indicators are not available for the full duration of the panel).*
 
-```{r, echo = FALSE, message = FALSE, warning = FALSE}
+```{r, echo = FALSE, message = FALSE, warning = FALSE, cache = TRUE}
 create_res <- function(df, cats, regx, suffix){
   res <- tibble()
   for(j in cats){
@@ -597,7 +689,7 @@ time_broad_inter_pc <- create_res(df = broad_df_inter, cats = broad_cats[grepl("
 ```
 
 
-```{r, echo = FALSE, message = FALSE, results = 'asis', warning = FALSE}
+```{r, echo = FALSE, message = FALSE, results = 'asis', warning = FALSE, cache = TRUE}
 
 tk <- full_join(time_broad_raw_pc$tbl, time_broad_inter_pc$tbl, by = c("outcome_var", "_"), suffix = c(".time_raw_pc", ".time_inter_pc")) %>% 
   select(-`_`) %>% 
@@ -612,7 +704,7 @@ knitr::asis_output(tk)
 ```
 
 
-```{r, echo = FALSE, message = FALSE, warning = FALSE}
+```{r, echo = FALSE, message = FALSE, warning = FALSE, cache = TRUE}
 # Totals
 # Time trends: PC expenditure with and without interpolated data
 time_tots_raw_pc <- create_res(df = tots, cats = "amount_pc", regx = " ~ time | fips", suffix = "")
@@ -620,7 +712,7 @@ time_tots_inter_pc <- create_res(df = inter_tots, cats = "amount_pc", regx = " ~
 ```
 
 
-```{r, echo = FALSE, message = FALSE, results = 'asis'}
+```{r, echo = FALSE, message = FALSE, results = 'asis', cache = TRUE}
 tt <- full_join(time_tots_raw_pc$tbl, time_tots_inter_pc$tbl, 
                 by = c("outcome_var", "_"), suffix = c(".time_raw_pc", ".time_inter_pc")) %>%
   select(-`_`) %>%
@@ -635,7 +727,7 @@ knitr::asis_output(tt)
 
 ## Spatial Variation: Linear Time Trends
 The below shows spatial distribution of trends in personal income, total direct expenditure, and expenditure (all in per capita values) in our four broad categories (trend values calculated in a linear time series model). These graphs show variation in the linear trends across counties. 
-```{r, echo = FALSE, message = FALSE, fig.height = 12}
+```{r, echo = FALSE, message = FALSE, fig.height = 12, cache = TRUE}
 
 deps = broad_cats[grepl("pc", broad_cats)]
 ldeps = paste0(" ~ l(", deps, ")")
@@ -688,9 +780,6 @@ for(k in vars){
 do.call(grid.arrange, c(tlist, ncol = 2, top = "Linear Trends in Key Variables"))
 
 
-
-
-
 ```
 
 
@@ -707,29 +796,294 @@ ar <- feols(data = broad_df, public_welfare_services_facilities_pc*1000 ~ time +
 ar_twfe <- feols(data = broad_df, public_welfare_services_facilities_pc*1000 ~ l(public_welfare_services_facilities_pc) | fips + year, panel.id = c('year', 'fips'), se = "twoway")
 ```
 
-# Preliminary Shift-Share Treatment Results
-Preliminary model results making use of shift-share instruments in employment and wage changes coming from coal, extraction, and oil & gas industries. 
+# Preliminary Shift-Share Treatment Results            
 
-The models below use a 2SLS approach using the shift-share as an instrument for changes in employment and wages per industry per county. Each model employs county- and year-fixed effects with two-way clustering of the standard errors.
+Preliminary model results making use of shift-share instruments in employment coming from coal, extraction, and oil & gas industries.             
 
-The first section uses overall public expenditure as a dependent variable. The second section breaks this expenditure down into the four categories mentioned above. 
+Dependent variables covered (all in per capita values):            
+* Total Revenue            
+  + Total Revenue (own sources)            
+  + Total Taxes            
+* Total Public Expenditure            
+  + Commercial            
+  + Public Welfare, Services, Facilities            
+  + Administration & Miscellaneous            
+  + Infrastructure, Utilities & Regulation            
+  
+Model Specifications:            
+* First stage regressions using changes in employment in coal, O&G, Extraction            
+* 2SLS using employment based shift-share instruments (base years 2001, 2005, and 2011)            
+ + 1- and 2-year time lags            
+ + interacted with regional dummies (5 in total)            
+ + interacted with a dummy for low economic diversity            
+* Using total county-level GDP, private-industry level GDP, and govt GDP) together and separately as control variables (govt gdp should be ignored when revenue is a dependent variable).            
 
-*Next steps:*          
-- Reconsider control variables beyond county-level personal income.      
-- Replace personal income with GDP now that time series is shortened as a consequence of data availability in the shift-share instrument).        
-- Experiment with different lags of the independent variable (currently assumes same-period change).      
-- Experiment with different base years for the shift-share instrument (currently constructed from base year 2001).   
 
+All models above were run for the time period 2001-2021 and 2005-2015 (to encompass the years immediately before and after the fossil fuel employment peak in ~2010). This specification was tested mainly as a precaution against static Bartik shares that assume consistency of initial employment shares over the entire time series.             
+
+The models below use a 2SLS approach using the shift-share as an instrument for changes in employment and wages per industry per county. Each model employs county- and year-fixed effects with two-way clustering of the standard errors.            
+
+The following tables show model results where at least one of the treatment variables (ie. not the GDP control variables) have a statistically significant regression coefficient at the 1% level.            
+
+```{r, echo = FALSE, message = FALSE, eval = FALSE, include = FALSE}
 ## Overall Public Expenditure
 
-```{r, echo = FALSE, message = FALSE}
+# Results transformation function
+trans_res <- function(mods){
+  return(mods %>% 
+  mutate(bartik_base_year = as.numeric(substr(sub('.*ss_emp_coal_|.*ss_wage_coal_|.*ss_emp_oil_gas_|.*ss_wage_oil_gas_|.*ss_emp_extraction_|.*ss_wage_extraction_',"", spec), 1, 4)),
+         econ_div_dum = grepl("econ_div", spec),
+         region_dum = grepl("region", spec),
+         sector = case_when(grepl("2121", spec) ~ "coal",
+                           grepl("extraction|21 ", spec) ~ "extraction", 
+                           grepl("211", spec) ~ "oil_gas"),
+         iv = grepl("year | ", spec, fixed = TRUE)))
+  }
 
 
-shift_shares <- readRDS(here('data/temp/shift_shares_2001_base.RDS')) %>% 
-  mutate(fips = ifelse(fips == "15009", "15901", fips),
-         fd_total_annual_wages_2121_k = fd_total_annual_wages_2121/1000,
-         ss_wage_coal_k = ss_wage_coal1000)
-  
+control_forms <- c(" ~ gdp_total_pc | fips + year",
+                   " ~ gdp_priv_ind_pc | fips + year", 
+                   " ~ gdp_priv_ind_pc + gdp_govt_pc | fips + year")
+              
+                     # Coal
+wage_mods <- c(" | fd_total_annual_wages_2121 ~ ss_wage_coal_[y]",
+                   " | l(fd_total_annual_wages_2121,1) + l(fd_total_annual_wages_2121,2) ~ l(ss_wage_coal_[y],1) + l(ss_wage_coal_[y],2)",
+                   " | i(low_econ_div, fd_total_annual_wages_2121) ~ i(low_econ_div, ss_wage_coal_[y])",
+                   " | i(region, fd_total_annual_wages_2121) ~ i(region, ss_wage_coal_[y])",
+                     # Extraction                                  
+                     " | fd_total_annual_wages_21 ~ ss_wage_extraction_[y]",
+                     " | l(fd_total_annual_wages_21,1) + l(fd_total_annual_wages_21,2) ~ l(ss_wage_extraction_[y],1) + l(ss_wage_extraction_[y],2)",
+                     " | i(low_econ_div, fd_total_annual_wages_21) ~ i(low_econ_div, ss_wage_extraction_[y])",
+                     " | i(region, fd_total_annual_wages_21) ~ i(region, ss_wage_extraction_[y])",
+                     # Oil & Gas
+                     " | fd_total_annual_wages_211 ~ ss_wage_oil_gas_[y]",
+                     " | l(fd_total_annual_wages_211,1) + l(fd_total_annual_wages_211,2) ~ l(ss_wage_oil_gas_[y],1) + l(ss_wage_oil_gas_[y],2)",
+                     " | i(low_econ_div, fd_total_annual_wages_211) ~ i(low_econ_div, ss_wage_oil_gas_[y])",
+                     " | i(region, fd_total_annual_wages_211) ~ i(region, ss_wage_oil_gas_[y])")
+
+                # Coal
+emp_mods <- c(" | fd_annual_avg_emplvl_2121 ~ ss_emp_coal_[y]",
+              " | l(fd_annual_avg_emplvl_2121,1) + l(fd_annual_avg_emplvl_2121,2) ~ l(ss_emp_coal_[y],1) + l(ss_emp_coal_[y],2)",
+              " | i(low_econ_div, fd_annual_avg_emplvl_2121) ~ i(low_econ_div, ss_emp_coal_[y])",
+              " | i(region, fd_annual_avg_emplvl_2121) ~ i(region, ss_emp_coal_[y])",
+              
+               # Extraction  
+               " | fd_annual_avg_emplvl_21 ~ ss_emp_extraction_[y]", 
+               " | l(fd_annual_avg_emplvl_21,1) + l(fd_annual_avg_emplvl_21,2) ~ l(ss_emp_extraction_[y],1) + l(ss_emp_extraction_[y],2)",
+               " | i(low_econ_div, fd_annual_avg_emplvl_21) ~ i(low_econ_div, ss_emp_extraction_[y])", 
+               " | i(region, fd_annual_avg_emplvl_21) ~ i(region, ss_emp_extraction_[y])",
+                 
+              # Oil & Gas
+               " | fd_annual_avg_emplvl_211 ~ ss_emp_oil_gas_[y]",
+               " | l(fd_annual_avg_emplvl_211,1) + l(fd_annual_avg_emplvl_211,2) ~ l(ss_emp_oil_gas_[y],1) + l(ss_emp_oil_gas_[y],2)",
+               " | i(low_econ_div, fd_annual_avg_emplvl_211) ~ i(low_econ_div, ss_emp_oil_gas_[y])",
+               " | i(region, fd_annual_avg_emplvl_211) ~ i(region, ss_emp_oil_gas_[y])")
+
+iv_forms_wage <- list() 
+iv_forms_emp <- list()
+
+for(k in c("2001", "2005", "2011")){
+  iv_forms_wage <- unlist(append(iv_forms_wage, gsub("[y]", k, wage_mods, fixed = TRUE)))
+  iv_forms_emp <- unlist(append(iv_forms_emp, gsub("[y]", k, emp_mods, fixed = TRUE)))
+}
+
+# Note that gdp_o_g_mining_quarr_21_pc exists as well! Potential treatment variable?
+tot_forms_wage <- c(c(" ~ fd_total_annual_wages_2121 + gdp_total_pc | fips + year",
+                      " ~ fd_total_annual_wages_21 + gdp_total_pc | fips + year",
+                      " ~ fd_total_annual_wages_211 + gdp_total_pc | fips + year",
+                      " ~ fd_total_annual_wages_2121 + gdp_priv_ind_pc + gdp_govt_pc | fips + year",
+                      " ~ fd_total_annual_wages_21 + gdp_priv_ind_pc + gdp_govt_pc | fips + year",
+                      " ~ fd_total_annual_wages_211 + gdp_priv_ind_pc + gdp_govt_pc | fips + year",
+                      " ~ fd_total_annual_wages_2121 + gdp_priv_ind_pc | fips + year",
+                      " ~ fd_total_annual_wages_21 + gdp_priv_ind_pc | fips + year",
+                      " ~ fd_total_annual_wages_211 + gdp_priv_ind_pc | fips + year"),
+                    paste0(sort(rep(control_forms, length(iv_forms_wage))), iv_forms_wage))
+
+tot_forms_emp <- c(c(" ~ fd_annual_avg_emplvl_2121 + gdp_total_pc | fips + year", 
+                     " ~ fd_annual_avg_emplvl_21 + gdp_total_pc | fips + year",
+                     " ~ fd_annual_avg_emplvl_211 + gdp_total_pc | fips + year",
+                     " ~ fd_annual_avg_emplvl_2121 + gdp_priv_ind_pc + gdp_govt_pc | fips + year", 
+                     " ~ fd_annual_avg_emplvl_21 + gdp_priv_ind_pc + gdp_govt_pc | fips + year",
+                     " ~ fd_annual_avg_emplvl_211 + gdp_priv_ind_pc + gdp_govt_pc | fips + year", 
+                   " ~ fd_annual_avg_emplvl_2121 + gdp_priv_ind_pc | fips + year", 
+                     " ~ fd_annual_avg_emplvl_21 + gdp_priv_ind_pc | fips + year",
+                     " ~ fd_annual_avg_emplvl_211 + gdp_priv_ind_pc | fips + year"), 
+                   paste0(sort(rep(control_forms, length(iv_forms_emp))), iv_forms_emp))
+
+tot_forms_emp_rest <- tot_forms_emp[!grepl("2001|2011", tot_forms_emp)]
+tot_forms_wage_rest <- tot_forms_wage[!grepl("2001|2011", tot_forms_wage)]
+
+mods_pub_exp_total <- tibble()
+for(form in c(tot_forms_emp, tot_forms_wage)){
+    forms <- paste0("amount_pc*1000", form)
+    w_e <- ifelse(grepl("wage", form), "wage", "emp")
+    res_curr <- feols(data = tots_df_ss, as.formula(forms), panel.id = c('year', 'fips'), se = "twoway")
+    sfig <- sum(pvalue(res_curr)[which(!grepl("gdp", names(pvalue(res_curr))))] < 0.01) > 0
+    mods_pub_exp_total <- rbind(mods_pub_exp_total,
+                                    tibble(spec = forms,
+                                           wage_emp = w_e,
+                                           dep_var = "total",
+                                           sig01 = sfig,
+                    res = list(res_curr)))
+}
+
+mods_pub_exp_total_rest <- tibble()
+for(form in c(tot_forms_emp_rest, tot_forms_wage_rest)){
+    forms <- paste0("amount_pc*1000", form)
+    w_e <- ifelse(grepl("wage", form), "wage", "emp")
+    res_curr <- feols(data = filter(tots_df_ss, year >= 2005 & year <= 2015), as.formula(forms), panel.id = c('year', 'fips'), se = "twoway")
+    sfig <- sum(pvalue(res_curr)[which(!grepl("gdp", names(pvalue(res_curr))))] < 0.01) > 0
+    mods_pub_exp_total_rest <- rbind(mods_pub_exp_total_rest,
+                                    tibble(spec = forms,
+                                           wage_emp = w_e,
+                                           dep_var = "total",
+                                           sig01 = sfig,
+                    res = list(res_curr)))
+}
+
+mods_pub_exp_total %>% trans_res %>% saveRDS(here("output/results_mods_pub_exp_total.RDS"))
+mods_pub_exp_total_rest %>% trans_res %>% saveRDS(here("output/results_mods_pub_exp_total_rest.RDS"))
+
+
+# print("TOTAL PUBLIC EXPENDITURE (PC): EMP")
+# for(i in 1:nrow(filter(mods_pub_exp_total, sig01 & wage_emp == "emp"))){
+#   mods_pub_exp_total %>% filter(sig01 & wage_emp == "emp") %>% slice(i) %>% pull(spec) %>% print
+#   mods_pub_exp_total %>% filter(sig01 & wage_emp == "emp") %>% slice(i) %>% pull(res) %>% first %>% print
+# }
+# 
+# print("TOTAL PUBLIC EXPENDITURE (PC): WAGE")
+# for(i in 1:nrow(filter(mods_pub_exp_total, sig01 & wage_emp == "wage"))){
+#   mods_pub_exp_total %>% filter(sig01 & wage_emp == "wage") %>%slice(i) %>% pull(spec) %>% print
+#   mods_pub_exp_total %>% filter(sig01 & wage_emp == "wage") %>%slice(i) %>% pull(res) %>% first %>% print
+# }
+
+
+```
+
+
+
+```{r, echo = FALSE, message = FALSE, eval = FALSE, include = FALSE}
+## Granular Categories
+
+deps = c("ADMINISTRATION & MISC EXPENDITURE (PC)" = "administration_misc_pc",
+         "COMMERCIAL EXPENDITURE (PC)" = "commercial_pc",
+         "INFRASTRUCTURE, UTILITIES & REGULATION (PC)" = "infrastructure_utilities_regulation_pc",
+         "PUBLIC WELFARE, SERVICES & FACILITIES (PC)" = "public_welfare_services_facilities_pc")
+
+
+mods_gran_exp <- tibble()
+for(dep in deps){
+  for(form in c(tot_forms_emp, tot_forms_wage)){
+    forms <- paste0(dep, "*1000", form)
+    w_e <- ifelse(grepl("wage", form), "wage", "emp")
+    res_curr <- feols(data = broad_df_ss, as.formula(forms), panel.id = c('year', 'fips'), se = "twoway")
+    sfig <- sum(pvalue(res_curr)[which(!grepl("gdp", names(pvalue(res_curr))))] < 0.01) > 0
+    mods_gran_exp <- rbind(mods_gran_exp, 
+                                    tibble(spec = forms, 
+                                            wage_emp = w_e,
+                                           dep_var = dep,
+                                           sig01 = sfig,
+                    res = list(res_curr)))
+  }
+}
+
+mods_gran_exp_rest <- tibble()
+for(dep in deps){
+for(form in c(tot_forms_emp_rest, tot_forms_wage_rest)){
+    forms <- paste0(dep, "*1000", form)
+    w_e <- ifelse(grepl("wage", form), "wage", "emp")
+    res_curr <- feols(data = filter(broad_df_ss, year >= 2005 & year <= 2015), as.formula(forms), panel.id = c('year', 'fips'), se = "twoway")
+    sfig <- sum(pvalue(res_curr)[which(!grepl("gdp", names(pvalue(res_curr))))] < 0.01) > 0
+    mods_gran_exp_rest <- rbind(mods_gran_exp_rest, 
+                                    tibble(spec = forms, 
+                                            wage_emp = w_e,
+                                           dep_var = dep,
+                                           sig01 = sfig,
+                    res = list(res_curr)))
+  }
+}
+
+
+mods_gran_exp %>% trans_res %>% saveRDS(here("output/results_mods_gran_exp.RDS"))
+mods_gran_exp_rest %>% trans_res %>% saveRDS(here("output/results_mods_gran_exp_rest.RDS"))
+
+
+# for(i in deps){
+#   print(names(deps[deps == i]))
+#   for(we in c("emp", "wage")){
+#     temp <- mods_gran_exp %>% filter(wage_emp == we & dep_var == i & sig01)
+#     for(k in 1:nrow(temp)){
+#       temp %>% slice(k) %>% pull(spec) %>% print
+#       temp %>% slice(k) %>% pull(res) %>% first %>% print
+#     }
+#   }
+# }
+
+```
+
+
+```{r, echo = FALSE, message = FALSE, eval = FALSE, include = FALSE}
+## Overall Public Revenue
+
+deps = c("TOTAL REVENUE (PC)" = "total_revenue_pc",
+         "TOTAL REVENUE OWN SOURCES (PC)" = "total_rev_own_sources_pc",
+         # "TOTAL UTILITY REVENUE (PC)" = "total_utility_revenue_pc",
+         #"TOTAL UNEMPLOYMENT REVENUE (PC)" = "total_unemp_rev",
+         #"TOTAL UNEMPLOYMENT FEDERAL ADVANCES (PC)" = "unemp_federal_advances",
+         "TOTAL TAXES (PC)" = "total_taxes_pc")
+         #"CORPORATE NET INCOME TAX (PC)" = "corp_net_income_tax_pc")
+
+
+mods_pub_rev <- tibble()
+for(dep in deps){
+  #for(df in list(inter_rev, rev_df)){
+   # ilog = ifelse(df == inter_rev, TRUE, FALSE)
+    for(form in c(tot_forms_wage, tot_forms_emp)){
+      forms <- paste0(dep, "*1000", form)
+      w_e <- ifelse(grepl("wage", form), "wage", "emp")
+      res_curr <- feols(data = inter_rev, as.formula(forms), panel.id = c('year', 'fips'), se = "twoway")
+      sfig <- sum(pvalue(res_curr)[which(!grepl("gdp", names(pvalue(res_curr))))] < 0.01) > 0
+      mods_pub_rev <- rbind(mods_pub_rev, 
+                                      tibble(spec = forms, 
+                                              wage_emp = w_e,
+                                             dep_var = dep,
+                                             inter = TRUE, #ilog,
+                                             sig01 = sfig,
+                      res = list(res_curr)))
+    #}
+  }
+}
+
+mods_pub_rev_rest <- tibble()
+for(dep in deps){
+  #for(df in list(inter_rev, rev_df)){
+   # ilog = ifelse(df == inter_rev, TRUE, FALSE)
+    for(form in c(tot_forms_emp_rest, tot_forms_wage_rest)){
+      forms <- paste0(dep, "*1000", form)
+      w_e <- ifelse(grepl("wage", form), "wage", "emp")
+      res_curr <- feols(data = filter(inter_rev, year >= 2005 & year <= 2015), as.formula(forms), panel.id = c('year', 'fips'), se = "twoway")
+      sfig <- sum(pvalue(res_curr)[which(!grepl("gdp", names(pvalue(res_curr))))] < 0.01) > 0
+      mods_pub_rev_rest <- rbind(mods_pub_rev_rest, 
+                                      tibble(spec = forms, 
+                                              wage_emp = w_e,
+                                             dep_var = dep,
+                                             inter = TRUE, #ilog,
+                                             sig01 = sfig,
+                      res = list(res_curr)))
+    #}
+  }
+}
+
+mods_pub_rev %>% trans_res %>% saveRDS(here("output/results_mods_pub_rev.RDS"))
+mods_pub_rev_rest %>% trans_res %>% saveRDS(here("output/results_mods_pub_rev_rest.RDS"))
+
+
+```
+
+## Results by Industry Type and Dependent Variable {.tabset}
+
+```{r, echo = FALSE, results = 'asis', fig.height = 9}
+
 
 dict = c(pinc_k_pc = "Personal Income (pc_k)",
          fd_total_annual_wages_2121 = "Wage Coal (FD)",
@@ -738,95 +1092,134 @@ dict = c(pinc_k_pc = "Personal Income (pc_k)",
          fd_annual_avg_emplvl_2121 = "Emp. Coal (FD)",
          fd_annual_avg_emplvl_21 = "Emp. Extract. (FD)", 
          fd_annual_avg_emplvl_211 = "Emp. O&G (FD)",
-         # All in pc_exp
          "administration_misc_pc*1000" = "Admin&Misc",
          "commercial_pc*1000 "= "Commercial",
          "infrastructure_utilities_regulation_pc*1000" = "Infr,Util,Reg",
          "public_welfare_services_facilities_pc*1000" = "Welf,Serv,Facil",
-         amount_pc = "Tot. Pub. Exp (PC)"
+         amount_pc = "Tot. Pub. Exp (PC)",
+         gdp_total_pc = "Total GDP (PC)",
+         gdp_priv_ind_pc = "GDP Priv. Ind. (PC)",
+         gdp_govt_pc = "Govt GDP (PC)",
+         "fit_l(fd_annual_avg_emplvl_2121, 2)" = "Coal Emp Brtk (l2)",
+         "fit_l(fd_annual_avg_emplvl_2121, 1)" = "Coal Emp Brtk (l1)",
+         "fit_region::Northeast:fd_annual_avg_emplvl_2121" = "Region_{NE}xEmp. Coal (FD)",
+         "fit_region::South:fd_annual_avg_emplvl_2121" = "Region_{S}xEmp. Coal (FD)",
+         "fit_region::North Central:fd_annual_avg_emplvl_2121" = "Region_{NC}xEmp. Coal (FD)",
+         "fit_low_econ_div::0:fd_annual_avg_emplvl_2121" = "EconDiv_{low}xEmp. Coal (FD)",
+         "fit_low_econ_div::1:fd_annual_avg_emplvl_2121" = "EconDiv_{high}xEmp. Coal (FD)",
+         "fit_l(fd_annual_avg_emplvl_211, 2)" = "O&G Emp Brtk (l2)",
+         "fit_l(fd_annual_avg_emplvl_211, 1)" = "O&G Emp Brtk (l1)",
+         "fit_region::Northeast:fd_annual_avg_emplvl_211" = "Region_{NE}xEmp. O&G (FD)",
+         "fit_region::South:fd_annual_avg_emplvl_211" = "Region_{S}xEmp. O&G (FD)",
+         "fit_region::North Central:fd_annual_avg_emplvl_211" = "Region_{NC}xEmp. O&G (FD)",
+         "fit_low_econ_div::0:fd_annual_avg_emplvl_211" = "EconDiv_{low}xEmp. O&G (FD)",
+         "fit_low_econ_div::1:fd_annual_avg_emplvl_211" = "EconDiv_{high}xEmp. O&G (FD)",
+          "fit_l(fd_annual_avg_emplvl_21, 2)" = "Extr. Emp Brtk (l2)",
+         "fit_l(fd_annual_avg_emplvl_21, 1)" = "Extr. Emp Brtk (l1)",
+         "fit_region::Northeast:fd_annual_avg_emplvl_21" = "Region_{NE}xEmp. Extr. (FD)",
+         "fit_region::South:fd_annual_avg_emplvl_21" = "Region_{S}xEmp. Extr. (FD)",
+         "fit_region::North Central:fd_annual_avg_emplvl_21" = "Region_{NC}xEmp. Extr. (FD)",
+         "fit_low_econ_div::0:fd_annual_avg_emplvl_21" = "EconDiv_{low}xEmp. Extr. (FD)",
+         "fit_low_econ_div::1:fd_annual_avg_emplvl_21" = "EconDiv_{high}xEmp. Extr. (FD)"
          )
+
 setFixest_dict(dict)
-  
-tots_df_ss <- inter_tots %>% 
-  filter(year >= 2001) %>% 
-  left_join(., shift_shares, by = c("fips", "year"))
+#setFixest_etable(markdown = TRUE)
 
-test <- feols(data = tots_df_ss, as.formula("amount_pc ~ -1 + pinc_k_pc | fips + year | fd_total_annual_wages_2121_k ~ ss_wage_coal_k"), panel.id = c('year', 'fips'), se = "twoway")
-
-test %>% etable
-              
-              
-
-iv_forms <- paste0(" ~ -1 + pinc_k_pc | fips + year ", c(" | fd_total_annual_wages_2121 ~ ss_wage_coal",
-                     "| fd_total_annual_wages_21 ~ ss_wage_extraction",
-                     "| fd_total_annual_wages_211 ~ ss_wage_oil_gas",
-                     "| fd_annual_avg_emplvl_2121 ~ ss_emp_coal",
-                    "| fd_annual_avg_emplvl_21 ~ ss_emp_extraction", 
-                    "| fd_annual_avg_emplvl_211 ~ ss_emp_oil_gas"))
-
-names(iv_forms) <- c("wage_coal", "wage_extraction", "wage_oil_gas", "emp_coal", "emp_extraction", "emp_oil_gas")
-#ss_emp_ff ~ fd_annual_avg_emplvl_XX, 
-#ss_wage_ff ~ fd_annual_wages_XX, 
+mods_pub_exp_total <- readRDS(here("output/results_mods_pub_exp_total.RDS"))
+mods_pub_exp_total_rest <- readRDS(here("output/results_mods_pub_exp_total_rest.RDS"))
+mods_gran_exp <- readRDS(here("output/results_mods_gran_exp.RDS"))
+mods_gran_exp_rest <- readRDS(here("output/results_mods_gran_exp_rest.RDS"))
+mods_pub_rev <- readRDS(here("output/results_mods_pub_rev.RDS"))
+mods_pub_rev_rest <- readRDS(here("output/results_mods_pub_rev_rest.RDS"))
 
 
-mods_pub_exp_total <- list()
-for(form in iv_forms){
-    forms <- paste0("amount_pc", form)
-    mods_pub_exp_total[[paste0(names(iv_forms[iv_forms == form]))]] <- feols(data = tots_df_ss, as.formula(forms), panel.id = c('year', 'fips'), se = "twoway")
+ind_types <- list("Coal" = "coal",
+                  "Oil & Gas" = "oil_gas",
+                  "Extraction" = "Extraction")
+
+dep_dfs <- list("Public Revenue" = mods_pub_rev,
+                "Public Expenditure (Total)" = mods_pub_exp_total,
+                "Public Expenditure (Granular)" = mods_gran_exp)
+
+
+
+for(i in ind_types){
+  cat('### ', names(ind_types[ind_types == i]), '{.tabset}   \n')
+    for(d in names(dep_dfs)){
+      cat('#### ', d, '{.tabset}   \n')
+      tmp <- dep_dfs[which(names(dep_dfs) == d)] %>% first %>% filter(sig01 & wage_emp == "emp" & sector == i)
+      cat('\n')
+      cat('\n')
+      cat('\n')
+      if(nrow(tmp) != 0){
+        deps <- tmp %>% pull(dep_var) %>% unique
+        for(dep in deps){
+          cat('##### ', toupper(dep), '{.tabset}   \n')
+            tmp %>% filter(dep_var == dep) %>% pull(res) %>% modelsummary(stars = TRUE, coef_rename = dict) %>% print
+            cat('\n')
+            cat('\n')
+            cat('\n')
+          }}else{print("No significant results!")}
+        cat('\n')
+        cat('\n')
+        cat('\n')
+      }
+    cat('\n')
+    cat('\n')
+    cat('\n')
+}  
+
+
+
+
+
+```
+
+## Results for restricted time series {.tabset}
+
+The following shows the significant results (using same exclusion restrictions and mdoel specifications as in the above section - 1% statistically significant regressors excluding GDP controls) but restricts the time series to 2005-2015 to encompass the years immediately before and after the fossil fuel employment peak in ~2010. This specification was tested mainly as a precaution against static Bartik shares that assume consistency of initial employment shares over the entire time series. 
+
+
+```{r, echo = FALSE, results = 'asis', fig.height = 9}
+
+dep_dfs <- list("Public Revenue" = mods_pub_rev_rest,
+                "Public Expenditure (Total)" = mods_pub_exp_total_rest,
+                "Public Expenditure (Granular)" = mods_gran_exp_rest)
+
+
+for(i in ind_types){
+  cat('### ', names(ind_types[ind_types == i]), '{.tabset}   \n')
+  cat('\n')
+      cat('\n')
+      cat('\n')
+    for(d in names(dep_dfs)){
+      cat('#### ', d, '{.tabset}   \n')
+      tmp <- dep_dfs[which(names(dep_dfs) == d)] %>% first %>% filter(sig01 & wage_emp == "emp" & sector == i)
+      cat('\n')
+      cat('\n')
+      cat('\n')
+      if(nrow(tmp) != 0){
+      deps <- tmp %>% pull(dep_var) %>% unique
+      for(dep in deps){
+         cat('##### ', toupper(dep), '{.tabset}   \n')
+         tmp %>% filter(dep_var == dep) %>% pull(res) %>% modelsummary(stars = TRUE, coef_rename = dict) %>% print
+          cat('\n')
+          cat('\n')
+          cat('\n')
+      }}else{print("No significant results!")}
+    cat('\n')
+    cat('\n')
+    cat('\n')
+    } 
+    cat('\n')
+    cat('\n')
+    cat('\n')
   }
-
-#setFixest_etable(markdown = TRUE, page.width = "a4") #style.tex = my_style, 
-
-print("TOTAL PUBLIC EXPENDITURE (PC)")
-mods_pub_exp_total %>% etable(order = "!Personal")
 
 
 
 ```
-
-
-## Granular Categories
-```{r, echo = FALSE, message = FALSE}
-
-broad_df_ss <- broad_df_inter %>% 
-  filter(year >= 2001) %>% 
-  left_join(., shift_shares, by = c("fips", "year"))
-
-iv_forms <- paste0(" ~ -1 + pinc_k_pc | fips + year ", c(" | fd_total_annual_wages_2121 ~ ss_wage_coal",
-                     "| fd_total_annual_wages_21 ~ ss_wage_extraction",
-                     "| fd_total_annual_wages_211 ~ ss_wage_oil_gas",
-                     "| fd_annual_avg_emplvl_2121 ~ ss_emp_coal",
-                    "| fd_annual_avg_emplvl_21 ~ ss_emp_extraction", 
-                    "| fd_annual_avg_emplvl_211 ~ ss_emp_oil_gas"))
-
-names(iv_forms) <- c("wage_coal", "wage_extraction", "wage_oil_gas", "emp_coal", "emp_extraction", "emp_oil_gas")
-#ss_emp_ff ~ fd_annual_avg_emplvl_XX, 
-#ss_wage_ff ~ fd_annual_wages_XX, 
-
-for(dep in deps[deps != "pinc_k_pc*1000"]){
-  temp_list <- list()
-  nam <- paste0("mods_", str_sub(dep, end=-6))
-  for(form in iv_forms){
-    forms <- paste0(dep, form)
-    temp_list[[paste0(names(iv_forms[iv_forms == form]),"_", str_sub(dep, end=-6))]] <- feols(data = broad_df_ss, as.formula(forms), panel.id = c('year', 'fips'), se = "twoway")
-  }
-  assign(nam, temp_list)
-}
-
-print("ADMINISTRATION & MISC EXPENDITURE (PC)")
-mods_administration_misc_pc %>% etable(order = "!Personal")
-
-print("COMMERCIAL EXPENDITURE (PC)")
-mods_commercial_pc %>% etable(order = "!Personal")
-
-print("INFRASTRUCTURE, UTILITIES & REGULATION (PC)")
-mods_infrastructure_utilities_regulation_pc %>% etable(order = "!Personal")
-
-print("PUBLIC WELFARE, SERVICES & FACILITIES (PC)")
-mods_public_welfare_services_facilities_pc %>% etable(order = "!Personal")
-
-```
-
 
 
 
