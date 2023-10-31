@@ -1105,6 +1105,7 @@ dict = c(pinc_k_pc = "Personal Income (pc_k)",
          "fit_region::Northeast:fd_annual_avg_emplvl_2121" = "Region_{NE}xEmp. Coal (FD)",
          "fit_region::South:fd_annual_avg_emplvl_2121" = "Region_{S}xEmp. Coal (FD)",
          "fit_region::North Central:fd_annual_avg_emplvl_2121" = "Region_{NC}xEmp. Coal (FD)",
+         "fit_region::West:fd_annual_avg_emplvl_2121" = "Region_{W}xEmp. Coal (FD)",
          "fit_low_econ_div::0:fd_annual_avg_emplvl_2121" = "EconDiv_{low}xEmp. Coal (FD)",
          "fit_low_econ_div::1:fd_annual_avg_emplvl_2121" = "EconDiv_{high}xEmp. Coal (FD)",
          "fit_l(fd_annual_avg_emplvl_211, 2)" = "O&G Emp Brtk (l2)",
@@ -1112,6 +1113,7 @@ dict = c(pinc_k_pc = "Personal Income (pc_k)",
          "fit_region::Northeast:fd_annual_avg_emplvl_211" = "Region_{NE}xEmp. O&G (FD)",
          "fit_region::South:fd_annual_avg_emplvl_211" = "Region_{S}xEmp. O&G (FD)",
          "fit_region::North Central:fd_annual_avg_emplvl_211" = "Region_{NC}xEmp. O&G (FD)",
+         "fit_region::West:fd_annual_avg_emplvl_211" = "Region_{W}xEmp. O&G (FD)",
          "fit_low_econ_div::0:fd_annual_avg_emplvl_211" = "EconDiv_{low}xEmp. O&G (FD)",
          "fit_low_econ_div::1:fd_annual_avg_emplvl_211" = "EconDiv_{high}xEmp. O&G (FD)",
           "fit_l(fd_annual_avg_emplvl_21, 2)" = "Extr. Emp Brtk (l2)",
@@ -1119,6 +1121,7 @@ dict = c(pinc_k_pc = "Personal Income (pc_k)",
          "fit_region::Northeast:fd_annual_avg_emplvl_21" = "Region_{NE}xEmp. Extr. (FD)",
          "fit_region::South:fd_annual_avg_emplvl_21" = "Region_{S}xEmp. Extr. (FD)",
          "fit_region::North Central:fd_annual_avg_emplvl_21" = "Region_{NC}xEmp. Extr. (FD)",
+         "fit_region::West:fd_annual_avg_emplvl_21" = "Region_{W}xEmp. Extr. (FD)",
          "fit_low_econ_div::0:fd_annual_avg_emplvl_21" = "EconDiv_{low}xEmp. Extr. (FD)",
          "fit_low_econ_div::1:fd_annual_avg_emplvl_21" = "EconDiv_{high}xEmp. Extr. (FD)"
          )
@@ -1148,7 +1151,7 @@ for(i in ind_types){
   cat('### ', names(ind_types[ind_types == i]), '{.tabset}   \n')
     for(d in names(dep_dfs)){
       cat('#### ', d, '{.tabset}   \n')
-      tmp <- dep_dfs[which(names(dep_dfs) == d)] %>% first %>% filter(sig01 & wage_emp == "emp" & sector == i)
+      tmp <- dep_dfs[which(names(dep_dfs) == d)] %>% first %>% filter(sig01 & wage_emp == "emp", sector == i)
       cat('\n')
       cat('\n')
       cat('\n')
@@ -1157,7 +1160,7 @@ for(i in ind_types){
         for(dep in deps){
           cat('##### ', toupper(dep), '{.tabset}   \n')
             tmp %>% filter(dep_var == dep) %>% pull(res) %>% modelsummary(stars = TRUE, coef_rename = dict) %>% print
-            cat('\n')
+           cat('\n')
             cat('\n')
             cat('\n')
           }}else{print("No significant results!")}
