@@ -1102,28 +1102,28 @@ dict = c(pinc_k_pc = "Personal Income (pc_k)",
          gdp_govt_pc = "Govt GDP (PC)",
          "fit_l(fd_annual_avg_emplvl_2121, 2)" = "Coal Emp Brtk (l2)",
          "fit_l(fd_annual_avg_emplvl_2121, 1)" = "Coal Emp Brtk (l1)",
-         "fit_region::Northeast:fd_annual_avg_emplvl_2121" = "Region_{NE}xEmp. Coal (FD)",
-         "fit_region::South:fd_annual_avg_emplvl_2121" = "Region_{S}xEmp. Coal (FD)",
-         "fit_region::North Central:fd_annual_avg_emplvl_2121" = "Region_{NC}xEmp. Coal (FD)",
-         "fit_region::West:fd_annual_avg_emplvl_2121" = "Region_{W}xEmp. Coal (FD)",
-         "fit_low_econ_div::0:fd_annual_avg_emplvl_2121" = "EconDiv_{low}xEmp. Coal (FD)",
-         "fit_low_econ_div::1:fd_annual_avg_emplvl_2121" = "EconDiv_{high}xEmp. Coal (FD)",
+         "fit_region::Northeast:fd_annual_avg_emplvl_2121" = "Region_{NE}xCoal Emp Brtk",
+         "fit_region::South:fd_annual_avg_emplvl_2121" = "Region_{S}xCoal Emp Brtk",
+         "fit_region::North Central:fd_annual_avg_emplvl_2121" = "Region_{NC}xCoal Emp Brtk",
+         "fit_region::West:fd_annual_avg_emplvl_2121" = "Region_{W}xCoal Emp Brtk",
+         "fit_low_econ_div::0:fd_annual_avg_emplvl_2121" = "EconDiv_{low}xCoal Emp Brtk",
+         "fit_low_econ_div::1:fd_annual_avg_emplvl_2121" = "EconDiv_{high}xCoal Emp Brtk",
          "fit_l(fd_annual_avg_emplvl_211, 2)" = "O&G Emp Brtk (l2)",
          "fit_l(fd_annual_avg_emplvl_211, 1)" = "O&G Emp Brtk (l1)",
-         "fit_region::Northeast:fd_annual_avg_emplvl_211" = "Region_{NE}xEmp. O&G (FD)",
-         "fit_region::South:fd_annual_avg_emplvl_211" = "Region_{S}xEmp. O&G (FD)",
-         "fit_region::North Central:fd_annual_avg_emplvl_211" = "Region_{NC}xEmp. O&G (FD)",
-         "fit_region::West:fd_annual_avg_emplvl_211" = "Region_{W}xEmp. O&G (FD)",
-         "fit_low_econ_div::0:fd_annual_avg_emplvl_211" = "EconDiv_{low}xEmp. O&G (FD)",
-         "fit_low_econ_div::1:fd_annual_avg_emplvl_211" = "EconDiv_{high}xEmp. O&G (FD)",
+         "fit_region::Northeast:fd_annual_avg_emplvl_211" = "Region_{NE}xO&G Emp Brtk",
+         "fit_region::South:fd_annual_avg_emplvl_211" = "Region_{S}xO&G Emp Brtk",
+         "fit_region::North Central:fd_annual_avg_emplvl_211" = "Region_{NC}xO&G Emp Brtk",
+         "fit_region::West:fd_annual_avg_emplvl_211" = "Region_{W}xO&G Emp Brtk",
+         "fit_low_econ_div::0:fd_annual_avg_emplvl_211" = "EconDiv_{low}xO&G Emp Brtk",
+         "fit_low_econ_div::1:fd_annual_avg_emplvl_211" = "EconDiv_{high}xO&G Emp Brtk",
           "fit_l(fd_annual_avg_emplvl_21, 2)" = "Extr. Emp Brtk (l2)",
          "fit_l(fd_annual_avg_emplvl_21, 1)" = "Extr. Emp Brtk (l1)",
-         "fit_region::Northeast:fd_annual_avg_emplvl_21" = "Region_{NE}xEmp. Extr. (FD)",
-         "fit_region::South:fd_annual_avg_emplvl_21" = "Region_{S}xEmp. Extr. (FD)",
-         "fit_region::North Central:fd_annual_avg_emplvl_21" = "Region_{NC}xEmp. Extr. (FD)",
-         "fit_region::West:fd_annual_avg_emplvl_21" = "Region_{W}xEmp. Extr. (FD)",
-         "fit_low_econ_div::0:fd_annual_avg_emplvl_21" = "EconDiv_{low}xEmp. Extr. (FD)",
-         "fit_low_econ_div::1:fd_annual_avg_emplvl_21" = "EconDiv_{high}xEmp. Extr. (FD)"
+         "fit_region::Northeast:fd_annual_avg_emplvl_21" = "Region_{NE}xExtr. Emp Brtk",
+         "fit_region::South:fd_annual_avg_emplvl_21" = "Region_{S}xExtr. Emp Brtk",
+         "fit_region::North Central:fd_annual_avg_emplvl_21" = "Region_{NC}xExtr. Emp Brtk",
+         "fit_region::West:fd_annual_avg_emplvl_21" = "Region_{W}xExtr. Emp Brtk",
+         "fit_low_econ_div::0:fd_annual_avg_emplvl_21" = "EconDiv_{low}xExtr. Emp Brtk",
+         "fit_low_econ_div::1:fd_annual_avg_emplvl_21" = "EconDiv_{high}xExtr. Emp Brtk"
          )
 
 setFixest_dict(dict)
@@ -1159,6 +1159,7 @@ for(i in ind_types){
         deps <- tmp %>% pull(dep_var) %>% unique
         for(dep in deps){
           cat('##### ', toupper(dep), '{.tabset}   \n')
+            tmp %>% filter(dep_var == dep) %>% pull(bartik_base_year) %>% print
             tmp %>% filter(dep_var == dep) %>% pull(res) %>% modelsummary(stars = TRUE, coef_rename = dict) %>% print
            cat('\n')
             cat('\n')
@@ -1206,6 +1207,7 @@ for(i in ind_types){
       deps <- tmp %>% pull(dep_var) %>% unique
       for(dep in deps){
          cat('##### ', toupper(dep), '{.tabset}   \n')
+         tmp %>% filter(dep_var == dep) %>% pull(bartik_base_year) %>% print
          tmp %>% filter(dep_var == dep) %>% pull(res) %>% modelsummary(stars = TRUE, coef_rename = dict) %>% print
           cat('\n')
           cat('\n')
